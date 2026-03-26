@@ -842,6 +842,7 @@ function selectItem() { const item = selectedItem(); if (item?.action) item.acti
 
 function goBack() {
   if (state.view === 'nowplaying') { state.view = 'menu'; render(); return; }
+  if (state.view === 'lbsetup')    { state.view = 'menu'; render(); return; }
   if (state.navStack.length > 1) { state.navStack.pop(); render(); }
 }
 
@@ -909,15 +910,8 @@ function openSettings() {
           render();
       }},
       { label: '🎨 Customize Theme', arrow: false, action: () => { openThemePanel(); }},
-      { _id: 'lb', label: state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off', arrow: false, action: () => {
-          const t = window.prompt(state.lbToken ? 'ListenBrainz token (clear to disable):' : 'Enter ListenBrainz user token:', state.lbToken);
-          if (t === null) return; // cancelled
-          const trimmed = t.trim();
-          state.lbToken = trimmed;
-          if (trimmed) localStorage.setItem('lbToken', trimmed);
-          else localStorage.removeItem('lbToken');
-          const item = currentMenu().items.find(i => i._id === 'lb');
-          if (item) { item.label = state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off'; render(); }
+      { _id: 'lb', label: state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off', arrow: true, action: () => {
+          state.view = 'lbsetup'; render();
       }},
       { _id: 'fullscreen', label: state.fullscreen ? '✕ Exit Fullscreen' : '⛶ Fullscreen', arrow: false, action: () => {
           toggleFullscreen();
@@ -1043,9 +1037,10 @@ async function jfOpenPlaylistTracks(playlistId, title) {
 // ═══════════════════════════════════════════
 function render() {
   const screen = document.getElementById('screen');
-  if (state.view === 'setup')      renderSetup(screen);
+  if (state.view === 'setup')         renderSetup(screen);
   else if (state.view === 'nowplaying') renderNowPlaying(screen);
-  else if (state.view === 'menu')  renderMenu(screen);
+  else if (state.view === 'menu')       renderMenu(screen);
+  else if (state.view === 'lbsetup')    renderLbSetup(screen);
 }
 
 /** Show an in-screen error bar instead of alert() — works in PWA standalone mode */
@@ -1392,18 +1387,14 @@ function renderSetup(screen) {
 function renderMenu(screen) {
   if (!currentMenu()) state.navStack = [buildMainMenu()];
   const m = currentMenu();
-  const VISIBLE = document.body.classList.contains('native') ? 20 : 6;
-  const total = m.items.length;
-  let start = Math.max(0, m.selectedIndex - 2);
-  if (start + VISIBLE > total) start = Math.max(0, total - VISIBLE);
-  const visible = m.items.slice(start, start + VISIBLE);
 
-  const rows = visible.map((item, i) => {
-    const absIdx = start + i;
-    const sel = absIdx === m.selectedIndex;
+  // Render all items — programmatic scrollTop keeps selected visible without
+  // a scrollbar. overflow:hidden allows scrollTop even with no visible scrollbar.
+  const rows = m.items.map((item, i) => {
+    const sel = i === m.selectedIndex;
     const arrow = item.arrow ? '<span class="arrow">›</span>' : '';
     const sub = item.sublabel ? `<span style="font-size:9px;opacity:0.65;margin-left:4px">${esc(item.sublabel)}</span>` : '';
-    return `<div class="menu-item ${sel ? 'selected' : ''}" data-idx="${absIdx}">
+    return `<div class="menu-item ${sel ? 'selected' : ''}" data-idx="${i}">
       <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(item.label)}${sub}</span>${arrow}
     </div>`;
   }).join('');
@@ -1425,9 +1416,55 @@ function renderMenu(screen) {
       <div class="menu-list">${rows}</div>
     </div>`;
 
+  // Scroll so selected item sits ~2 rows from the top
+  const list = screen.querySelector('.menu-list');
+  const selEl = list?.querySelector('.menu-item.selected');
+  if (list && selEl) {
+    const itemH = selEl.offsetHeight || 44;
+    list.scrollTop = Math.max(0, selEl.offsetTop - itemH * 2);
+  }
+
   screen.querySelectorAll('.menu-item').forEach(el =>
     el.addEventListener('click', () => { m.selectedIndex = parseInt(el.dataset.idx, 10); selectItem(); })
   );
+}
+
+function renderLbSetup(screen) {
+  screen.innerHTML = `
+    <div class="setup-screen">
+      <h2>ListenBrainz</h2>
+      <p class="su-sub">Scrobble your listening history to ListenBrainz — the open, community-owned music tracking service.</p>
+      <a href="https://listenbrainz.org/settings/" target="_blank" rel="noopener noreferrer"
+         style="font-size:11px;color:var(--np-artist,#6a9aba);text-decoration:underline;text-align:center;display:block;padding:4px 0">
+        Get your token at listenbrainz.org/settings →
+      </a>
+      <input id="lb-input" type="text" placeholder="Paste user token here"
+             autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false"
+             value="${esc(state.lbToken)}" />
+      <button id="lb-save" class="setup-btn">Save</button>
+      ${state.lbToken ? '<button id="lb-clear" class="setup-btn" style="background:rgba(180,0,0,0.25)">Disable Scrobbling</button>' : ''}
+      <button id="lb-cancel" class="setup-btn" style="background:transparent;border:1px solid rgba(255,255,255,0.15);opacity:0.7">Cancel</button>
+    </div>`;
+
+  screen.querySelector('#lb-save').addEventListener('click', () => {
+    const token = screen.querySelector('#lb-input').value.trim();
+    state.lbToken = token;
+    if (token) localStorage.setItem('lbToken', token);
+    else localStorage.removeItem('lbToken');
+    const item = currentMenu()?.items?.find(i => i._id === 'lb');
+    if (item) item.label = state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off';
+    state.view = 'menu'; render();
+  });
+  screen.querySelector('#lb-cancel').addEventListener('click', () => {
+    state.view = 'menu'; render();
+  });
+  screen.querySelector('#lb-clear')?.addEventListener('click', () => {
+    state.lbToken = '';
+    localStorage.removeItem('lbToken');
+    const item = currentMenu()?.items?.find(i => i._id === 'lb');
+    if (item) item.label = '♫ Scrobbling: Off';
+    state.view = 'menu'; render();
+  });
 }
 
 function renderNowPlaying(screen) {
