@@ -9,7 +9,8 @@
 <meta name="apple-mobile-web-app-title" content="MediaPod">
 <meta name="theme-color" content="#111111">
 <meta name="referrer" content="no-referrer">
-<!-- connect-src cannot be narrowed: Plex/Jellyfin server URLs are user-configured at runtime. Accepted risk for personal-use deployment. -->
+<!-- connect-src cannot be narrowed: Plex server URLs are user-configured at runtime. Accepted risk for personal-use deployment. -->
+<!-- frame-ancestors cannot be set via <meta> — only works as an HTTP header, which GitHub Pages does not support. Clickjacking risk is accepted for personal-use deployment. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://plex.tv https://*.plex.tv https://*.plex.direct data: blob:; connect-src *; img-src * data: blob:; media-src * blob:; style-src 'self' 'unsafe-inline'; script-src 'self';">
 <title>MediaPod</title>
 <link rel="manifest" href="manifest.json">
@@ -229,6 +230,74 @@ body.fullscreen { background: #000; }
 .menu-item.selected { background: var(--sel-bg); color: var(--sel-color); }
 .menu-item .arrow { font-size: 10px; opacity: 0.6; flex-shrink: 0; }
 .menu-item.selected .arrow { opacity: 0.9; }
+
+/* ── Cover Flow ── */
+.coverflow-screen {
+  width: 100%; height: 100%; display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #1a1a1e 0%, #000 55%);
+  overflow: hidden;
+}
+.cf-stage {
+  flex: 1; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  perspective: 700px; perspective-origin: 50% 45%;
+}
+.cf-item {
+  position: absolute;
+  width: var(--cf-size, 160px); height: var(--cf-size, 160px);
+  left: 50%; top: 50%;
+  margin-left: calc(var(--cf-size, 160px) / -2);
+  margin-top:  calc(var(--cf-size, 160px) / -2);
+  border-radius: 4px; overflow: hidden; cursor: pointer;
+  transition: transform 0.32s cubic-bezier(0.4,0,0.2,1),
+              filter 0.32s ease, opacity 0.32s ease;
+}
+.cf-item img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  user-select: none; -webkit-user-select: none;
+}
+.cf-active {
+  transform: translateX(0) rotateY(0deg) scale(1);
+  filter: brightness(1); z-index: 10;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.85);
+}
+.cf-prev {
+  transform: translateX(-62%) rotateY(52deg) scale(0.82);
+  filter: brightness(0.5); z-index: 7;
+}
+.cf-next {
+  transform: translateX(62%) rotateY(-52deg) scale(0.82);
+  filter: brightness(0.5); z-index: 7;
+}
+.cf-far-prev {
+  transform: translateX(-108%) rotateY(64deg) scale(0.64);
+  filter: brightness(0.28); z-index: 4;
+}
+.cf-far-next {
+  transform: translateX(108%) rotateY(-64deg) scale(0.64);
+  filter: brightness(0.28); z-index: 4;
+}
+.cf-hidden { opacity: 0; pointer-events: none; }
+.cf-info {
+  padding: 10px 20px 6px; text-align: center; flex-shrink: 0;
+}
+.cf-album-title {
+  font-size: 13px; font-weight: 600; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cf-artist-name {
+  font-size: 11px; color: rgba(255,255,255,0.55); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cf-track-count { font-size: 10px; color: rgba(255,255,255,0.32); margin-top: 2px; }
+.cf-np-bar {
+  font-size: 9px; padding: 3px 8px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0.55; color: #fff; flex-shrink: 0;
+}
+body.native .cf-album-title { font-size: clamp(14px, 3.5vw, 20px); }
+body.native .cf-artist-name { font-size: clamp(12px, 3vw, 16px); }
 
 /* ── Now Playing ── */
 .nowplaying-screen {

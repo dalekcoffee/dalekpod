@@ -75,6 +75,9 @@ const state = {
   lbToken:        _uuidRe.test(_storedLbToken) ? _storedLbToken : '',
   connected:   false,
   connStatus:  'disconnected', // 'connecting' | 'connected' | 'disconnected'
+  coverFlowAlbums: [],
+  coverFlowIndex: 0,
+  coverFlowSectionKey: '',
   navStack:    [],
   audio:       new Audio(),
   playing:     false,
@@ -289,7 +292,8 @@ const BRANDS = {
 };
 
 function applySetupBranding() {
-  const b = BRANDS[state.serverType][state.darkMode ? 'dark' : 'light'];
+  const brandKey = BRANDS[state.serverType] ? state.serverType : 'plex';
+  const b = BRANDS[brandKey][state.darkMode ? 'dark' : 'light'];
   const r = document.documentElement.style;
   r.setProperty('--su-bg',          b.bg);
   r.setProperty('--su-title',       b.title);
@@ -603,10 +607,22 @@ async function plexFetch(path) {
   return safeJson(res);
 }
 
+// Generic placeholder for items without artwork — inline SVG, no external dep
+const PLACEHOLDER_THUMB = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">' +
+  '<rect width="80" height="80" rx="4" fill="#2a2a2e"/>' +
+  '<text x="40" y="53" text-anchor="middle" font-size="38" font-family="system-ui,sans-serif" fill="#4a4a5e">♪</text>' +
+  '</svg>'
+)}`;
+
 function plexThumb(thumb, size = 80) {
   if (!thumb) return null;
   // Token must be in URL — browser <img> cannot send custom headers
   return `${state.plexUrl}/photo/:/transcode?width=${size}&height=${size}&url=${encodeURIComponent(thumb)}&X-Plex-Token=${encodeURIComponent(state.plexToken)}`;
+}
+
+function thumbOrPlaceholder(thumb, size = 80) {
+  return plexThumb(thumb, size) || PLACEHOLDER_THUMB;
 }
 
 function plexStream(key) {
@@ -887,6 +903,7 @@ function playShuffled(tracks) {
 function goBack() {
   if (state.view === 'nowplaying') { state.view = 'menu'; render(); return; }
   if (state.view === 'lbsetup')    { state.view = 'menu'; render(); return; }
+  if (state.view === 'coverflow')  { state.view = 'menu'; render(); return; }
   if (state.navStack.length > 1) { state.navStack.pop(); render(); }
 }
 
@@ -916,10 +933,10 @@ async function apiMenu(loadMsg, fetchFn, mapFn, title) {
 //  MENUS — SHARED
 // ═══════════════════════════════════════════
 function buildMainMenu() {
-  const title = state.serverType === 'jellyfin' ? 'JellyPod' : 'PlexPod';
   return {
-    title, selectedIndex: 0,
+    title: 'MediaPod', selectedIndex: 0,
     items: [
+      { label: 'Cover Flow',  arrow: true, action: openCoverFlow },
       { label: 'Music',       arrow: true, action: openMusicMenu },
       { label: 'Now Playing', arrow: true, action: () => { if (state.currentTrack) { state.view = 'nowplaying'; render(); } } },
       { label: 'Settings',   arrow: true, action: openSettings },
@@ -991,12 +1008,12 @@ function openSettings() {
 // ═══════════════════════════════════════════
 async function openArtistList(sectionKey, title) {
   await apiMenu('Loading artists...', () => plexFetch(`/library/sections/${sectionKey}/all?type=8`), d =>
-    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, thumb: plexThumb(a.thumb, 80), arrow: true, action: () => openArtistAlbums(a.ratingKey, a.title) })), title);
+    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, thumb: thumbOrPlaceholder(a.thumb, 80), arrow: true, action: () => openArtistAlbums(a.ratingKey, a.title) })), title);
 }
 
 async function openArtistAlbums(key, name) {
   await apiMenu('Loading...', () => plexFetch(`/library/metadata/${key}/children`), d => {
-    const albums = (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, thumb: plexThumb(a.thumb, 80), arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) }));
+    const albums = (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, thumb: thumbOrPlaceholder(a.thumb, 80), arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) }));
     return [
       { label: '⇄ Shuffle Artist', arrow: false, action: async () => {
           showLoading('Loading tracks…');
@@ -1012,7 +1029,7 @@ async function openArtistAlbums(key, name) {
 
 async function openAlbumList(sectionKey, title) {
   await apiMenu('Loading albums...', () => plexFetch(`/library/sections/${sectionKey}/all?type=9`), d =>
-    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, sublabel: a.parentTitle, thumb: plexThumb(a.thumb, 80), arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) })), title);
+    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, sublabel: a.parentTitle, thumb: thumbOrPlaceholder(a.thumb, 80), arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) })), title);
 }
 
 async function openAlbumTracks(key, title) {
@@ -1020,7 +1037,7 @@ async function openAlbumTracks(key, title) {
     const tracks = d.MediaContainer.Metadata || [];
     return [
       { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: plexThumb(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: thumbOrPlaceholder(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
     ];
   }, title);
 }
@@ -1030,14 +1047,14 @@ async function openSongList(sectionKey, title) {
     const tracks = d.MediaContainer.Metadata || [];
     return [
       { label: '⇄ Shuffle All', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: plexThumb(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: thumbOrPlaceholder(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
     ];
   }, title);
 }
 
 async function openPlaylists() {
   await apiMenu('Loading playlists...', () => plexFetch('/playlists?playlistType=audio'), d =>
-    (d.MediaContainer.Metadata || []).map(p => ({ label: p.title, thumb: plexThumb(p.composite || p.thumb, 80), arrow: true, action: () => openPlaylistTracks(p.ratingKey, p.title) })), 'Playlists');
+    (d.MediaContainer.Metadata || []).map(p => ({ label: p.title, thumb: thumbOrPlaceholder(p.composite || p.thumb, 80), arrow: true, action: () => openPlaylistTracks(p.ratingKey, p.title) })), 'Playlists');
 }
 
 async function openPlaylistTracks(key, title) {
@@ -1045,7 +1062,7 @@ async function openPlaylistTracks(key, title) {
     const tracks = d.MediaContainer.Metadata || [];
     return [
       { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: plexThumb(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: thumbOrPlaceholder(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
     ];
   }, title);
 }
@@ -1131,12 +1148,121 @@ async function jfOpenPlaylistTracks(playlistId, title) {
 }
 
 // ═══════════════════════════════════════════
+//  COVER FLOW
+// ═══════════════════════════════════════════
+async function openCoverFlow() {
+  showLoading('Loading albums…');
+  try {
+    const data = await plexFetch('/library/sections');
+    const musicSections = (data.MediaContainer.Directory || []).filter(s => s.type === 'artist');
+    if (!musicSections.length) throw new Error('No music libraries found');
+    const sectionKey = musicSections[0].key;
+    state.coverFlowSectionKey = sectionKey;
+    const albums = await plexFetch(`/library/sections/${sectionKey}/all?type=9`);
+    state.coverFlowAlbums = albums.MediaContainer.Metadata || [];
+    if (!state.coverFlowAlbums.length) throw new Error('No albums found');
+    state.coverFlowIndex = 0;
+    state.view = 'coverflow';
+    render();
+  } catch(e) { showMenuError(e.message); }
+}
+
+function cfNavigate(dir) {
+  const len = state.coverFlowAlbums.length;
+  if (!len) return;
+  const next = Math.max(0, Math.min(len - 1, state.coverFlowIndex + dir));
+  if (next === state.coverFlowIndex) { vibe(HAPTIC.boundary); return; }
+  state.coverFlowIndex = next;
+  vibe(HAPTIC.tick);
+  if (state.view === 'coverflow') render();
+}
+
+function cfOpenCurrentAlbum() {
+  const album = state.coverFlowAlbums[state.coverFlowIndex];
+  if (!album) return;
+  vibe(HAPTIC.select);
+  openAlbumTracks(album.ratingKey, album.title);
+}
+
+function renderCoverFlow(screen) {
+  const albums = state.coverFlowAlbums;
+  const idx    = state.coverFlowIndex;
+  const cur    = albums[idx] || {};
+  const vw     = window.innerWidth;
+  const cfSize = Math.min(Math.round(vw * 0.52), 210);
+
+  const albumThumb = a => a ? (plexThumb(a.thumb, 400) || PLACEHOLDER_THUMB) : PLACEHOLDER_THUMB;
+
+  // Render 5 positions around the current index
+  const positions = [
+    { offset: -2, cls: 'cf-far-prev' },
+    { offset: -1, cls: 'cf-prev'     },
+    { offset:  0, cls: 'cf-active'   },
+    { offset:  1, cls: 'cf-next'     },
+    { offset:  2, cls: 'cf-far-next' },
+  ];
+
+  const itemsHtml = positions.map(({ offset, cls }) => {
+    const album = albums[idx + offset];
+    const src   = albumThumb(album);
+    const aidx  = idx + offset;
+    const hidden = (!album && offset !== 0) ? ' cf-hidden' : '';
+    return `<div class="cf-item ${cls}${hidden}" data-idx="${aidx}">
+      <img src="${esc(src)}" referrerpolicy="no-referrer" loading="lazy" draggable="false" />
+    </div>`;
+  }).join('');
+
+  const npBar = state.currentTrack
+    ? `<div class="cf-np-bar">♪ ${esc(state.currentTrack.title)}</div>` : '';
+
+  screen.innerHTML = `
+    <div class="coverflow-screen" style="--cf-size:${cfSize}px">
+      <div class="menu-titlebar">
+        <div class="title">Cover Flow</div>
+        <div class="conn-status ${state.connStatus}">${idx + 1} / ${albums.length}</div>
+      </div>
+      <div class="cf-stage">${itemsHtml}</div>
+      <div class="cf-info">
+        <div class="cf-album-title">${esc(cur.title || '')}</div>
+        <div class="cf-artist-name">${esc(cur.parentTitle || '')}</div>
+        ${cur.leafCount ? `<div class="cf-track-count">${cur.leafCount} track${cur.leafCount !== 1 ? 's' : ''}</div>` : ''}
+      </div>
+      ${npBar}
+    </div>`;
+
+  // Touch swipe on the stage
+  const stage = screen.querySelector('.cf-stage');
+  let cfTx = null;
+  stage.addEventListener('touchstart', e => { cfTx = e.touches[0].clientX; }, { passive: true });
+  stage.addEventListener('touchend', e => {
+    if (cfTx === null) return;
+    const dx = e.changedTouches[0].clientX - cfTx;
+    cfTx = null;
+    if (Math.abs(dx) < 24) { cfOpenCurrentAlbum(); return; }
+    cfNavigate(dx < 0 ? 1 : -1);
+  }, { passive: true });
+
+  // Click on side items to navigate; click active to open
+  screen.querySelectorAll('.cf-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const itemIdx = parseInt(el.dataset.idx, 10);
+      if (isNaN(itemIdx)) return;
+      if (itemIdx === state.coverFlowIndex) { cfOpenCurrentAlbum(); return; }
+      const clamped = Math.max(0, Math.min(albums.length - 1, itemIdx));
+      state.coverFlowIndex = clamped;
+      render();
+    });
+  });
+}
+
+// ═══════════════════════════════════════════
 //  RENDER
 // ═══════════════════════════════════════════
 function render() {
   const screen = document.getElementById('screen');
-  if (state.view === 'setup')         renderSetup(screen);
+  if (state.view === 'setup')           renderSetup(screen);
   else if (state.view === 'nowplaying') renderNowPlaying(screen);
+  else if (state.view === 'coverflow')  renderCoverFlow(screen);
   else if (state.view === 'menu')       renderMenu(screen);
   else if (state.view === 'lbsetup')    renderLbSetup(screen);
 }
@@ -1395,29 +1521,29 @@ const DALEK_BANNER = `<a class="dalek-banner" href="https://dalek.coffee" target
 function renderSetup(screen) {
   applySetupBranding();
   stopPlexPoll();
-  const isPlex = state.serverType === 'plex';
-  const brand  = BRANDS[state.serverType][state.darkMode ? 'dark' : 'light'];
+  const isOAuth = state.serverType !== 'manual';
+  const brand   = BRANDS['plex'][state.darkMode ? 'dark' : 'light'];
 
   screen.innerHTML = `
     ${DALEK_BANNER}
     <div class="setup-screen">
-      <h2>${isPlex ? '🟠 PlexPod' : '🟣 JellyPod'}</h2>
+      <h2>MediaPod</h2>
       <div class="server-toggle">
-        <button class="srv-btn ${isPlex ? 'active' : ''}" id="srv-plex">Plex</button>
-        <button class="srv-btn ${!isPlex ? 'active' : ''}" id="srv-jf">Jellyfin</button>
+        <button class="srv-btn ${isOAuth ? 'active' : ''}" id="srv-plex">Plex Auth</button>
+        <button class="srv-btn ${!isOAuth ? 'active' : ''}" id="srv-jf">Manual</button>
       </div>
 
-      ${isPlex ? `
-        <!-- ── Plex: one-tap OAuth only ── -->
+      ${isOAuth ? `
+        <!-- ── Plex: one-tap OAuth ── -->
         <button class="setup-btn" id="plex-oauth-btn"
           style="background:${brand.accent};box-shadow:0 2px 6px ${brand.shadow}">
           Sign in with Plex
         </button>
       ` : `
-        <!-- ── Jellyfin: URL + API key ── -->
-        <input id="srv-url"    type="url"  placeholder="http://192.168.1.x:8096" value="${esc(state.jellyfinUrl)}" autocomplete="url" />
-        <input id="srv-secret" type="text" placeholder="API Key" value="${esc(state.jellyfinApiKey)}" autocomplete="off" spellcheck="false" />
-        <p class="su-hint">API Key: Dashboard → API Keys → +</p>
+        <!-- ── Manual: direct server URL + Plex token ── -->
+        <input id="srv-url"    type="url"  placeholder="https://192.168.1.x:32400" autocomplete="url" />
+        <input id="srv-secret" type="text" placeholder="Plex Token" autocomplete="off" spellcheck="false" />
+        <p class="su-hint">Get your token: Plex Web → ⋮ → Account → Plex Media Server</p>
         <button class="setup-btn" id="connect-btn"
           style="background:${brand.accent};box-shadow:0 2px 6px ${brand.shadow}">Connect</button>
       `}
@@ -1425,14 +1551,14 @@ function renderSetup(screen) {
     </div>
   `;
 
-  // Server toggle
+  // Tab toggle
   document.getElementById('srv-plex').addEventListener('click', () => {
-    if (state.serverType === 'plex') return;
+    if (isOAuth) return;
     state.serverType = 'plex'; render();
   });
   document.getElementById('srv-jf').addEventListener('click', () => {
-    if (state.serverType === 'jellyfin') return;
-    state.serverType = 'jellyfin'; render();
+    if (!isOAuth) return;
+    state.serverType = 'manual'; render();
   });
 
   const showErr = msg => {
@@ -1444,45 +1570,42 @@ function renderSetup(screen) {
     }, 30);
   };
 
-  if (isPlex) {
+  if (isOAuth) {
     document.getElementById('plex-oauth-btn').addEventListener('click', startPlexOAuth);
-
   } else {
-    // Jellyfin: URL + API key
+    // Manual: direct Plex server URL + token
     document.getElementById('connect-btn').addEventListener('click', async () => {
-      // Rate limit: require 5 s between failed attempts
       if (Date.now() - _lastConnectFailTs < 5000) { showErr('Please wait before trying again.'); return; }
-      const url    = document.getElementById('srv-url').value.trim().replace(/\/$/, '');
-      const secret = document.getElementById('srv-secret').value.trim();
-      if (!url || !secret) { showErr('Fill in both fields.'); return; }
+      const url   = document.getElementById('srv-url').value.trim().replace(/\/$/, '');
+      const token = document.getElementById('srv-secret').value.trim();
+      if (!url || !token) { showErr('Fill in both fields.'); return; }
       if (!isValidUrl(url)) { showErr('URL must start with http:// or https://'); return; }
+      if (!/^[a-zA-Z0-9_-]+$/.test(token)) { showErr('Token contains unexpected characters.'); return; }
       showLoading('Connecting...');
       state.connStatus = 'connecting';
       try {
-        state.jellyfinUrl    = url;
-        state.jellyfinApiKey = secret;
-        const usersRes = await fetchWithTimeout(
-          `${url}/Users`,
-          { headers: { Accept: 'application/json', Authorization: `MediaBrowser Token="${secret}"` } },
+        const test = await proxiedFetch(
+          `${url}/`,
+          { headers: { ...PLEX_HEADERS, Accept: 'application/json', 'X-Plex-Token': token } },
           8000
         );
-        if (!usersRes.ok) throw new Error(`HTTP ${usersRes.status}`);
-        const users = await safeJson(usersRes);
-        if (!users.length) throw new Error('No users found');
-        // Validate API key format before storing — defense in depth
-        if (!/^[a-zA-Z0-9_-]+$/.test(secret)) throw new Error('API key contains unexpected characters.');
-        state.jellyfinUserId = users[0].Id;
-        localStorage.setItem('jellyfinUrl',    url);
-        localStorage.setItem('jellyfinApiKey', secret);
-        localStorage.setItem('jellyfinUserId', state.jellyfinUserId);
-        localStorage.setItem('serverType', 'jellyfin');
+        if (!test.ok) throw new Error(`Server returned ${test.status}. Check your URL and token.`);
+        state.plexUrl   = url;
+        state.plexToken = token;
+        state.serverType = 'plex';
+        localStorage.setItem('plexUrl',    url);
+        localStorage.setItem('plexToken',  token);
+        localStorage.setItem('serverType', 'plex');
         state.connected = true; state.connStatus = 'connected';
         state.navStack = [buildMainMenu()]; state.view = 'menu';
         applyTheme(); render();
-      } catch (e) { _lastConnectFailTs = Date.now(); showErr(e.message || 'Could not connect. Check URL and API key.'); }
+      } catch (e) {
+        _lastConnectFailTs = Date.now();
+        showErr(e.message || 'Could not connect. Check your server URL and Plex token.');
+      }
     });
 
-    ['srv-url','srv-secret'].forEach(id =>
+    ['srv-url', 'srv-secret'].forEach(id =>
       document.getElementById(id)?.addEventListener('keydown', e => {
         if (e.key === 'Enter') document.getElementById('connect-btn').click();
       })
@@ -1814,6 +1937,14 @@ function onRimMove(e) {
       else { vibe(HAPTIC.boundary); }
     }
 
+  } else if (state.view === 'coverflow') {
+    wheel.accum += delta;
+    const ticks = Math.trunc(wheel.accum / DEG_PER_MENU_TICK);
+    if (ticks !== 0) {
+      wheel.accum -= ticks * DEG_PER_MENU_TICK;
+      cfNavigate(ticks);
+    }
+
   } else if (state.view === 'nowplaying' && state.duration > 0) {
     enterScrubMode();
     clearTimeout(wheel.scrubTimer);
@@ -1914,10 +2045,11 @@ function addZoneTap(id, action) {
 
 addZoneTap('zone-top',    () => { vibe(HAPTIC.back); goBack(); });
 addZoneTap('zone-bottom', () => { if (state.currentTrack) { vibe(HAPTIC.select); togglePlay(); } });
-addZoneTap('zone-left',   () => { vibe(HAPTIC.tick); if (state.view === 'nowplaying') prevTrack();  else scrollMenu(-1); });
-addZoneTap('zone-right',  () => { vibe(HAPTIC.tick); if (state.view === 'nowplaying') nextTrack(); else scrollMenu(1);  });
+addZoneTap('zone-left',   () => { vibe(HAPTIC.tick); if (state.view === 'nowplaying') prevTrack(); else if (state.view === 'coverflow') cfNavigate(-1); else scrollMenu(-1); });
+addZoneTap('zone-right',  () => { vibe(HAPTIC.tick); if (state.view === 'nowplaying') nextTrack(); else if (state.view === 'coverflow') cfNavigate(1);  else scrollMenu(1);  });
 document.getElementById('wheel-center').addEventListener('click', () => {
   if (state.view === 'menu')           { vibe(HAPTIC.select); selectItem(); }
+  else if (state.view === 'coverflow') { vibe(HAPTIC.select); cfOpenCurrentAlbum(); }
   else if (state.view === 'nowplaying') { vibe(HAPTIC.select); togglePlay(); }
   else if (state.view === 'setup') {
     // Trigger whichever primary action button is visible
@@ -1933,9 +2065,9 @@ document.addEventListener('keydown', e => {
   switch(e.key) {
     case 'ArrowUp':    scrollMenu(-1); break;
     case 'ArrowDown':  scrollMenu(1); break;
-    case 'ArrowLeft':  if (state.view === 'nowplaying') prevTrack(); break;
-    case 'ArrowRight': if (state.view === 'nowplaying') nextTrack(); break;
-    case 'Enter':      if (state.view === 'menu') selectItem(); else if (state.view === 'nowplaying') togglePlay(); break;
+    case 'ArrowLeft':  if (state.view === 'nowplaying') prevTrack(); else if (state.view === 'coverflow') cfNavigate(-1); break;
+    case 'ArrowRight': if (state.view === 'nowplaying') nextTrack(); else if (state.view === 'coverflow') cfNavigate(1);  break;
+    case 'Enter':      if (state.view === 'menu') selectItem(); else if (state.view === 'coverflow') cfOpenCurrentAlbum(); else if (state.view === 'nowplaying') togglePlay(); break;
     case 'Escape': case 'Backspace': goBack(); break;
     case ' ':          if (state.currentTrack) { e.preventDefault(); togglePlay(); } break;
     case 'f': case 'F': toggleFullscreen(); break;

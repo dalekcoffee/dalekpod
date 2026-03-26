@@ -1,25 +1,24 @@
 // Cloudflare Worker — CORS proxy for Plex API calls from pod.dalek.coffee
-// Deploy at: plex-proxy.dalek.coffee (or any subdomain you prefer)
-//
-// SETUP:
-// 1. Go to dash.cloudflare.com → Workers & Pages → Create
-// 2. Name it "plex-proxy" → Deploy
-// 3. Edit Code → paste this file → Save and Deploy
-// 4. Go to Settings → Triggers → Custom Domains → add "plex-proxy.dalek.coffee"
-//    (or use the *.workers.dev URL and update PROXY_ORIGIN in mediapod.js)
-//
-// RATE LIMITING (optional but recommended):
-// The Origin header check stops browser-based abuse but not curl/scripts.
-// To add rate limiting: Workers & Pages → your worker → Settings →
-// scroll to "Rate Limiting" or use Cloudflare WAF rules on the custom domain.
+// Proxies fetch() requests that browsers would otherwise block due to Plex's
+// CORS policy (Access-Control-Allow-Origin: https://app.plex.tv only).
+// Only requests from the exact allowed origin are forwarded, and only to
+// known Plex hosts. No credentials are logged.
 
-const ALLOWED_ORIGIN = 'https://pod.dalek.coffee';
+const ALLOWED_ORIGIN  = 'https://pod.dalek.coffee';
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'OPTIONS']);
-const MAX_BODY_BYTES = 1024 * 64; // 64 KB — Plex API POST bodies are tiny
+const MAX_BODY_BYTES  = 1024 * 64; // 64 KB — Plex API payloads are tiny
 
-// Headers to STRIP before forwarding to Plex. This prevents leaking
-// Cloudflare-injected metadata while preserving all Plex headers the
-// server may need for token validation.
+// Headers we explicitly allow in CORS preflights
+const CORS_ALLOW_HEADERS = [
+  'accept', 'content-type',
+  'x-plex-token', 'x-plex-client-identifier',
+  'x-plex-product', 'x-plex-version', 'x-plex-platform',
+  'x-proxy-url',
+].join(', ');
+
+// Headers stripped from the incoming request before forwarding upstream.
+// Removes Cloudflare-injected headers and proxy routing meta-headers so the
+// Plex server only sees what the browser originally intended to send.
 const STRIPPED_HEADERS = [
   'host', 'origin', 'x-proxy-url',
   'cf-connecting-ip', 'cf-ipcountry', 'cf-ray', 'cf-visitor',
@@ -29,42 +28,43 @@ const STRIPPED_HEADERS = [
 
 export default {
   async fetch(request) {
-    // Only allow requests from our app
+    // ── Origin gate ──────────────────────────────────────────────────────────
     const origin = request.headers.get('Origin');
     if (origin !== ALLOWED_ORIGIN) {
       return new Response('Forbidden', { status: 403 });
     }
 
-    // Handle CORS preflight
+    // ── CORS preflight ───────────────────────────────────────────────────────
     if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders(request),
-      });
+      return new Response(null, { status: 204, headers: corsHeaders() });
     }
 
-    // Restrict HTTP methods to what Plex API actually needs
+    // ── Method gate ──────────────────────────────────────────────────────────
     if (!ALLOWED_METHODS.has(request.method)) {
       return new Response('Method not allowed', { status: 405 });
     }
 
-    // Reject oversized request bodies (Plex API POSTs are tiny)
+    // ── POST body size gate ──────────────────────────────────────────────────
+    // Require Content-Length on POST so we can enforce the limit without
+    // buffering the entire body (which would double memory usage).
     if (request.method === 'POST') {
       const cl = request.headers.get('Content-Length');
-      if (cl && parseInt(cl, 10) > MAX_BODY_BYTES) {
+      if (!cl) return new Response('Content-Length required', { status: 411 });
+      if (parseInt(cl, 10) > MAX_BODY_BYTES) {
         return new Response('Payload too large', { status: 413 });
       }
     }
 
-    // The real Plex URL is passed in the X-Proxy-URL header
+    // ── Target URL validation ────────────────────────────────────────────────
     const targetUrl = request.headers.get('X-Proxy-URL');
     if (!targetUrl) {
       return new Response('Missing X-Proxy-URL header', { status: 400 });
     }
 
-    // Validate target is a Plex domain over HTTPS (prevent open relay / SSRF)
     let parsed;
-    try { parsed = new URL(targetUrl); } catch { return new Response('Invalid URL', { status: 400 }); }
+    try { parsed = new URL(targetUrl); } catch {
+      return new Response('Invalid target URL', { status: 400 });
+    }
 
     if (parsed.protocol !== 'https:') {
       return new Response('HTTPS required', { status: 400 });
@@ -78,44 +78,45 @@ export default {
       return new Response('Target host not allowed', { status: 403 });
     }
 
-    // Forward all headers except Cloudflare metadata and proxy internals.
-    // Plex servers may require headers beyond the documented X-Plex-* set
-    // for token validation — stripping too aggressively causes 401s.
+    // ── Build forwarded headers ──────────────────────────────────────────────
+    // Start from all incoming headers, then strip proxy/CF meta-headers.
+    // The Plex token stays in the x-plex-token header — never put credentials
+    // in the URL (they appear in server access logs and CF subrequest logs).
     const proxyHeaders = new Headers(request.headers);
     for (const name of STRIPPED_HEADERS) {
       proxyHeaders.delete(name);
     }
 
+    // ── Upstream request ─────────────────────────────────────────────────────
     try {
       const res = await fetch(targetUrl, {
-        method: request.method,
+        method:  request.method,
         headers: proxyHeaders,
-        body: request.method === 'POST' ? request.body : undefined,
+        body:    request.method === 'POST' ? request.body : undefined,
       });
 
-      // Replace Plex's CORS header with ours
+      // Stream the response back; rewrite CORS headers so the browser accepts it
       const responseHeaders = new Headers(res.headers);
       responseHeaders.delete('Access-Control-Allow-Origin');
-      responseHeaders.set('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
+      responseHeaders.set('Access-Control-Allow-Origin',      ALLOWED_ORIGIN);
       responseHeaders.set('Access-Control-Allow-Credentials', 'true');
 
       return new Response(res.body, {
-        status: res.status,
+        status:     res.status,
         statusText: res.statusText,
-        headers: responseHeaders,
+        headers:    responseHeaders,
       });
-    } catch (_) {
-      // Don't leak internal network details in error messages
+    } catch {
       return new Response('Bad gateway', { status: 502 });
     }
   },
 };
 
-function corsHeaders(request) {
+function corsHeaders() {
   return {
-    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+    'Access-Control-Allow-Origin':  ALLOWED_ORIGIN,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') || '*',
-    'Access-Control-Max-Age': '86400',
+    'Access-Control-Allow-Headers': CORS_ALLOW_HEADERS,
+    'Access-Control-Max-Age':       '86400',
   };
 }
