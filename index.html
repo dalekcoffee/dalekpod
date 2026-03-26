@@ -453,7 +453,7 @@ body.native .np-art {
   height: var(--native-art-size, 120px);
   max-width:  none;
   max-height: none;
-  margin: clamp(6px, 1.5vh, 18px) auto clamp(4px, 1vh, 12px);
+  margin: auto auto clamp(4px, 1vh, 12px); /* top auto centers block below titlebar */
 }
 
 body.native .np-info { padding: 0 20px; }
@@ -465,7 +465,7 @@ body.native .np-progress-area { padding: clamp(4px,1vh,10px) 20px clamp(2px,0.6v
 body.native .np-progress-bar  { height: 5px; border-radius: 3px; }
 body.native .np-times { font-size: clamp(10px, 2.4vw, 15px); }
 
-body.native .np-controls { gap: clamp(20px, 8vw, 52px); padding: clamp(4px,1.2vh,10px) 0; }
+body.native .np-controls { gap: clamp(20px, 8vw, 52px); padding: clamp(4px,1.2vh,10px) 0; margin-bottom: auto; /* bottom auto centers block above dead space */ }
 body.native .np-ctrl-btn { font-size: clamp(18px, 5vw, 32px); }
 body.native .np-ctrl-btn.play-pause { font-size: clamp(26px, 7vw, 44px); }
 

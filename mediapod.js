@@ -993,8 +993,10 @@ function render() {
 
 /** Show an in-screen error bar instead of alert() — works in PWA standalone mode */
 function showMenuError(msg) {
-  // If not already in menu view, go there first
-  if (state.view !== 'menu') { state.view = 'menu'; render(); }
+  // Always render the menu — showLoading() stomps innerHTML directly without
+  // changing state.view, so we can't rely on state.view to detect loading state.
+  state.view = 'menu';
+  render();
 
   // Inject error bar on next frame so the menu list DOM exists
   requestAnimationFrame(() => {
