@@ -840,6 +840,12 @@ function scrollMenu(dir) {
 
 function selectItem() { const item = selectedItem(); if (item?.action) item.action(item); }
 
+function playShuffled(tracks) {
+  if (!tracks.length) return;
+  const shuffled = [...tracks].sort(() => Math.random() - 0.5);
+  playTrack(shuffled[0], shuffled, 0);
+}
+
 function goBack() {
   if (state.view === 'nowplaying') { state.view = 'menu'; render(); return; }
   if (state.view === 'lbsetup')    { state.view = 'menu'; render(); return; }
@@ -892,6 +898,13 @@ async function openMusicMenu() {
     if (!musicSections.length) throw new Error('No music libraries found');
     const sectionKey = musicSections[0].key;
     pushMenu('Music', [
+      { label: '⇄ Shuffle All', arrow: false, action: async () => {
+          showLoading('Loading tracks…');
+          try {
+            const d = await plexFetch(`/library/sections/${sectionKey}/all?type=10`);
+            playShuffled(d.MediaContainer.Metadata || []);
+          } catch(e) { showMenuError(e.message); }
+      }},
       { label: 'Artists',   arrow: true, action: () => openArtistList(sectionKey, 'Artists') },
       { label: 'Albums',    arrow: true, action: () => openAlbumList(sectionKey, 'Albums') },
       { label: 'Songs',     arrow: true, action: () => openSongList(sectionKey, 'Songs') },
@@ -944,8 +957,19 @@ async function openArtistList(sectionKey, title) {
 }
 
 async function openArtistAlbums(key, name) {
-  await apiMenu('Loading...', () => plexFetch(`/library/metadata/${key}/children`), d =>
-    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) })), name);
+  await apiMenu('Loading...', () => plexFetch(`/library/metadata/${key}/children`), d => {
+    const albums = (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) }));
+    return [
+      { label: '⇄ Shuffle Artist', arrow: false, action: async () => {
+          showLoading('Loading tracks…');
+          try {
+            const d = await plexFetch(`/library/metadata/${key}/allLeaves`);
+            playShuffled(d.MediaContainer.Metadata || []);
+          } catch(e) { showMenuError(e.message); }
+      }},
+      ...albums
+    ];
+  }, name);
 }
 
 async function openAlbumList(sectionKey, title) {
@@ -956,14 +980,20 @@ async function openAlbumList(sectionKey, title) {
 async function openAlbumTracks(key, title) {
   await apiMenu('Loading tracks...', () => plexFetch(`/library/metadata/${key}/children`), d => {
     const tracks = d.MediaContainer.Metadata || [];
-    return tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }));
+    return [
+      { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }))
+    ];
   }, title);
 }
 
 async function openSongList(sectionKey, title) {
   await apiMenu('Loading songs...', () => plexFetch(`/library/sections/${sectionKey}/all?type=10`), d => {
     const tracks = d.MediaContainer.Metadata || [];
-    return tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }));
+    return [
+      { label: '⇄ Shuffle All', arrow: false, action: () => playShuffled(tracks) },
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }))
+    ];
   }, title);
 }
 
@@ -975,7 +1005,10 @@ async function openPlaylists() {
 async function openPlaylistTracks(key, title) {
   await apiMenu('Loading...', () => plexFetch(`/playlists/${key}/items`), d => {
     const tracks = d.MediaContainer.Metadata || [];
-    return tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }));
+    return [
+      { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }))
+    ];
   }, title);
 }
 
@@ -984,6 +1017,13 @@ async function openPlaylistTracks(key, title) {
 // ═══════════════════════════════════════════
 function jfOpenMusicMenu() {
   pushMenu('Music', [
+    { label: '⇄ Shuffle All', arrow: false, action: async () => {
+        showLoading('Loading tracks…');
+        try {
+          const d = await jellyfinFetch(`/Items?IncludeItemTypes=Audio&Recursive=true&SortBy=SortName&SortOrder=Ascending&Limit=500&UserId=${encodeURIComponent(state.jellyfinUserId)}`);
+          playShuffled((d.Items || []).map(normalizeJfTrack));
+        } catch(e) { showMenuError(e.message); }
+    }},
     { label: 'Artists',   arrow: true, action: jfOpenArtistList },
     { label: 'Albums',    arrow: true, action: jfOpenAlbumList },
     { label: 'Songs',     arrow: true, action: jfOpenSongList },
@@ -997,8 +1037,19 @@ async function jfOpenArtistList() {
 }
 
 async function jfOpenArtistAlbums(artistId, name) {
-  await apiMenu('Loading...', () => jellyfinFetch(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&ArtistIds=${encodeURIComponent(artistId)}&SortBy=ProductionYear,SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d =>
-    (d.Items || []).map(a => ({ label: a.Name, sublabel: a.ProductionYear ? String(a.ProductionYear) : '', arrow: true, action: () => jfOpenAlbumTracks(a.Id, a.Name) })), name);
+  await apiMenu('Loading...', () => jellyfinFetch(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&ArtistIds=${encodeURIComponent(artistId)}&SortBy=ProductionYear,SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d => {
+    const albums = (d.Items || []).map(a => ({ label: a.Name, sublabel: a.ProductionYear ? String(a.ProductionYear) : '', arrow: true, action: () => jfOpenAlbumTracks(a.Id, a.Name) }));
+    return [
+      { label: '⇄ Shuffle Artist', arrow: false, action: async () => {
+          showLoading('Loading tracks…');
+          try {
+            const td = await jellyfinFetch(`/Items?IncludeItemTypes=Audio&Recursive=true&ArtistIds=${encodeURIComponent(artistId)}&UserId=${encodeURIComponent(state.jellyfinUserId)}&SortBy=SortName`);
+            playShuffled((td.Items || []).map(normalizeJfTrack));
+          } catch(e) { showMenuError(e.message); }
+      }},
+      ...albums,
+    ];
+  }, name);
 }
 
 async function jfOpenAlbumList() {
@@ -1009,14 +1060,20 @@ async function jfOpenAlbumList() {
 async function jfOpenAlbumTracks(albumId, title) {
   await apiMenu('Loading tracks...', () => jellyfinFetch(`/Items?ParentId=${encodeURIComponent(albumId)}&IncludeItemTypes=Audio&SortBy=IndexNumber,SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d => {
     const tracks = (d.Items || []).map(normalizeJfTrack);
-    return tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }));
+    return [
+      { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) })),
+    ];
   }, title);
 }
 
 async function jfOpenSongList() {
   await apiMenu('Loading songs...', () => jellyfinFetch(`/Items?IncludeItemTypes=Audio&Recursive=true&SortBy=SortName&SortOrder=Ascending&Limit=500&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d => {
     const tracks = (d.Items || []).map(normalizeJfTrack);
-    return tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }));
+    return [
+      { label: '⇄ Shuffle All', arrow: false, action: () => playShuffled(tracks) },
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) })),
+    ];
   }, 'Songs');
 }
 
@@ -1028,7 +1085,10 @@ async function jfOpenPlaylists() {
 async function jfOpenPlaylistTracks(playlistId, title) {
   await apiMenu('Loading...', () => jellyfinFetch(`/Playlists/${encodeURIComponent(playlistId)}/Items?UserId=${encodeURIComponent(state.jellyfinUserId)}`), d => {
     const tracks = (d.Items || []).map(normalizeJfTrack);
-    return tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }));
+    return [
+      { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) })),
+    ];
   }, title);
 }
 
