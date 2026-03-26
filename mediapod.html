@@ -291,8 +291,7 @@ body.fullscreen { background: #000; }
 }
 .wheel-center:active { filter: brightness(0.82); }
 .wheel-zone { position: absolute; cursor: pointer; }
-.wheel-zone:active,
-.wheel-zone.pressed { background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 70%); }
+.wheel-zone:active { background: none; }
 
 /* Loading */
 .loading {
@@ -468,8 +467,6 @@ body.native .menu-item .arrow { font-size: clamp(11px, 2.6vw, 17px); }
   margin-left: calc(var(--cf-size, 160px) / -2);
   margin-top:  calc(var(--cf-size, 160px) / -2);
   border-radius: 4px; overflow: hidden; cursor: pointer;
-  transition: transform 0.2s cubic-bezier(0.25,0,0.2,1),
-              filter 0.2s ease-out, opacity 0.2s ease-out;
   will-change: transform, filter;
 }
 .cf-item img {

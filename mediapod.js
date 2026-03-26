@@ -94,6 +94,9 @@ const DEFAULT_THEME = { uiHue: 0, podHue: 0, podSat: 0 };
 // Rate-limit: timestamp of last failed Manual connection attempt
 let _lastConnectFailTs = 0;
 
+// CoverFlow spring animation state
+const cfAnim = { offset: 0, raf: null };
+
 const UI_PRESETS = [
   { hue: 215, label: 'Classic',  color: 'hsl(215,65%,45%)' },
   { hue: 38,  label: 'Plex',     color: '#E5A00D' },
@@ -831,7 +834,7 @@ function playShuffled(tracks) {
 function goBack() {
   if (state.view === 'nowplaying') { state.view = 'menu'; render(); return; }
   if (state.view === 'lbsetup')    { state.view = 'menu'; render(); return; }
-  if (state.view === 'coverflow')  { state.view = 'menu'; render(); return; }
+  if (state.view === 'coverflow')  { if (cfAnim.raf) { cancelAnimationFrame(cfAnim.raf); cfAnim.raf = null; } state.view = 'menu'; render(); return; }
   if (state.navStack.length > 1) { state.navStack.pop(); render(); }
 }
 
@@ -1019,7 +1022,7 @@ function cfNavigate(dir) {
   if (next === state.coverFlowIndex) { vibe(HAPTIC.boundary); return; }
   state.coverFlowIndex = next;
   vibe(HAPTIC.tick);
-  if (state.view === 'coverflow') cfUpdateDOM();
+  if (state.view === 'coverflow') { cfUpdateSrcs(); cfStartAnim(); }
 }
 
 function cfOpenCurrentAlbum() {
@@ -1029,48 +1032,95 @@ function cfOpenCurrentAlbum() {
   openAlbumTracks(album.ratingKey, album.title);
 }
 
-function cfUpdateDOM() {
+// ── CoverFlow spring animation ───────────────────────────────────────────────
+
+/** Piecewise-linear transform matching the original CSS class values exactly */
+function cfCalcTransform(vp) {
+  const sign = vp >= 0 ? 1 : -1;
+  const abs  = Math.abs(vp);
+  let tx, ry, sc, br;
+  if (abs <= 1) {
+    tx = sign * abs * 62;   ry = -sign * abs * 52;
+    sc = 1 - abs * 0.18;    br = 1 - abs * 0.5;
+  } else {
+    const t = abs - 1;
+    tx = sign * (62 + t * 46);   ry = -sign * (52 + t * 12);
+    sc = 0.82 - t * 0.18;        br = 0.5  - t * 0.22;
+  }
+  const op = abs > 2.2 ? Math.max(0, 1 - (abs - 2.2) * 3) : 1;
+  const zi = Math.round(Math.max(1, 10 - abs * 3));
+  return { tx, ry, sc: Math.max(0.55, sc), br: Math.max(0.15, br), op, zi };
+}
+
+function cfApplyTransforms() {
   const screen = document.getElementById('screen');
-  const albums = state.coverFlowAlbums;
-  const idx    = state.coverFlowIndex;
-  const items  = screen ? screen.querySelectorAll('.cf-item') : [];
-  if (items.length !== 5) { render(); return; }  // safety fallback
-
-  const positions = [
-    { offset: -2, cls: 'cf-far-prev' },
-    { offset: -1, cls: 'cf-prev'     },
-    { offset:  0, cls: 'cf-active'   },
-    { offset:  1, cls: 'cf-next'     },
-    { offset:  2, cls: 'cf-far-next' },
-  ];
-  const ALL_CF = ['cf-far-prev','cf-prev','cf-active','cf-next','cf-far-next','cf-hidden'];
-  const albumThumb = a => a ? (plexThumb(a.thumb, 400) || PLACEHOLDER_THUMB) : PLACEHOLDER_THUMB;
-
+  if (!screen) return;
+  const items = screen.querySelectorAll('.cf-item');
+  if (!items.length) return;
+  const targetIdx = state.coverFlowIndex;
   items.forEach((el, i) => {
-    const { offset, cls } = positions[i];
-    const album  = albums[idx + offset];
-    const hidden = !album && offset !== 0;
-    el.classList.remove(...ALL_CF);
-    el.classList.add(cls);
-    if (hidden) el.classList.add('cf-hidden');
-    el.dataset.idx = idx + offset;
-    const img = el.querySelector('img');
-    if (img) img.src = albumThumb(album);
+    const slotOffset = i - 2; // slots: -2, -1, 0, 1, 2
+    const vp = slotOffset + (targetIdx - cfAnim.offset);
+    const { tx, ry, sc, br, op, zi } = cfCalcTransform(vp);
+    el.style.transform = `translateX(${tx}%) rotateY(${ry}deg) scale(${sc})`;
+    el.style.filter    = `brightness(${br})`;
+    el.style.opacity   = op;
+    el.style.zIndex    = zi;
   });
+}
 
-  // Update counter
-  const connEl = screen.querySelector('.conn-status');
-  if (connEl) connEl.textContent = `${idx + 1} / ${albums.length}`;
-
-  // Update info — textContent is safe for raw API strings
-  const cur = albums[idx] || {};
+function cfUpdateInfo() {
+  const screen = document.getElementById('screen');
+  if (!screen) return;
+  const albums = state.coverFlowAlbums;
+  const nearIdx = Math.max(0, Math.min(albums.length - 1, Math.round(cfAnim.offset)));
+  const cur = albums[nearIdx] || {};
   const titleEl  = screen.querySelector('.cf-album-title');
   const artistEl = screen.querySelector('.cf-artist-name');
   const countEl  = screen.querySelector('.cf-track-count');
+  const connEl   = screen.querySelector('.conn-status');
   if (titleEl)  titleEl.textContent  = cur.title       || '';
   if (artistEl) artistEl.textContent = cur.parentTitle || '';
   if (countEl)  countEl.textContent  = cur.leafCount
     ? `${cur.leafCount} track${cur.leafCount !== 1 ? 's' : ''}` : '';
+  if (connEl)   connEl.textContent   = `${nearIdx + 1} / ${albums.length}`;
+}
+
+function cfUpdateSrcs() {
+  const screen = document.getElementById('screen');
+  if (!screen) return;
+  const items = screen.querySelectorAll('.cf-item');
+  if (!items.length) return;
+  const albums = state.coverFlowAlbums;
+  const targetIdx = state.coverFlowIndex;
+  const thumb = a => a ? (plexThumb(a.thumb, 400) || PLACEHOLDER_THUMB) : PLACEHOLDER_THUMB;
+  items.forEach((el, i) => {
+    const albumIdx = targetIdx + (i - 2);
+    const img = el.querySelector('img');
+    if (img) img.src = thumb(albums[albumIdx]);
+    el.dataset.idx = albumIdx;
+  });
+}
+
+function cfStartAnim() {
+  if (cfAnim.raf) return; // already running
+  cfAnim.raf = requestAnimationFrame(cfAnimFrame);
+}
+
+function cfAnimFrame() {
+  const target = state.coverFlowIndex;
+  const diff   = target - cfAnim.offset;
+  if (Math.abs(diff) < 0.004) {
+    cfAnim.offset = target;
+    cfAnim.raf    = null;
+    cfApplyTransforms();
+    cfUpdateInfo();
+    return;
+  }
+  cfAnim.offset += diff * 0.25; // spring: lerp 25% of remaining gap per frame
+  cfApplyTransforms();
+  cfUpdateInfo();
+  cfAnim.raf = requestAnimationFrame(cfAnimFrame);
 }
 
 function renderCoverFlow(screen) {
@@ -1080,23 +1130,20 @@ function renderCoverFlow(screen) {
   const vw     = window.innerWidth;
   const cfSize = Math.min(Math.round(vw * 0.52), 210);
 
+  // Snap animation position to current index (no animation on initial render)
+  if (cfAnim.raf) { cancelAnimationFrame(cfAnim.raf); cfAnim.raf = null; }
+  cfAnim.offset = idx;
+
   const albumThumb = a => a ? (plexThumb(a.thumb, 400) || PLACEHOLDER_THUMB) : PLACEHOLDER_THUMB;
 
-  // Render 5 positions around the current index
-  const positions = [
-    { offset: -2, cls: 'cf-far-prev' },
-    { offset: -1, cls: 'cf-prev'     },
-    { offset:  0, cls: 'cf-active'   },
-    { offset:  1, cls: 'cf-next'     },
-    { offset:  2, cls: 'cf-far-next' },
-  ];
+  // Render 5 slots; rAF animation drives all transforms via inline styles
+  const offsets = [-2, -1, 0, 1, 2];
 
-  const itemsHtml = positions.map(({ offset, cls }) => {
+  const itemsHtml = offsets.map(offset => {
     const album = albums[idx + offset];
     const src   = albumThumb(album);
     const aidx  = idx + offset;
-    const hidden = (!album && offset !== 0) ? ' cf-hidden' : '';
-    return `<div class="cf-item ${cls}${hidden}" data-idx="${aidx}">
+    return `<div class="cf-item" data-idx="${aidx}">
       <img src="${esc(src)}" referrerpolicy="no-referrer" loading="lazy" draggable="false" />
     </div>`;
   }).join('');
@@ -1119,6 +1166,9 @@ function renderCoverFlow(screen) {
       ${npBar}
     </div>`;
 
+  // Apply initial transforms so items are positioned immediately (no animation jump)
+  cfApplyTransforms();
+
   // Touch swipe on the stage
   const stage = screen.querySelector('.cf-stage');
   let cfTx = null;
@@ -1140,7 +1190,8 @@ function renderCoverFlow(screen) {
       const clamped = Math.max(0, Math.min(albums.length - 1, itemIdx));
       state.coverFlowIndex = clamped;
       vibe(HAPTIC.tick);
-      cfUpdateDOM();
+      cfUpdateSrcs();
+      cfStartAnim();
     });
   });
 }
@@ -1681,10 +1732,10 @@ function renderNowPlaying(screen) {
 // ═══════════════════════════════════════════
 const vibe = (p) => { try { navigator.vibrate?.(p); } catch(_) {} };
 const HAPTIC = {
-  tick:     2,          // menu step — single short pulse
-  select:   [6, 20, 6], // SELECT press
-  back:     [3, 15, 3], // MENU / back
-  boundary: [10,25,10], // hit list edge
+  tick:     10,           // menu step — single short pulse
+  select:   [15, 30, 15], // SELECT press
+  back:     [8, 20, 8],   // MENU / back
+  boundary: [20, 30, 20], // hit list edge
   scrubTick: 1,         // scrub position tick
 };
 
@@ -1943,11 +1994,9 @@ function addZoneTap(id, action) {
   let ts = null;
   el.addEventListener('touchstart', e => {
     ts = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    el.classList.add('pressed');
     // Do NOT stopPropagation — rim must still receive drag gestures
   }, { passive: true });
   el.addEventListener('touchend', e => {
-    el.classList.remove('pressed');
     if (!ts) return;
     const moved = Math.hypot(
       e.changedTouches[0].clientX - ts.x,
@@ -1957,7 +2006,7 @@ function addZoneTap(id, action) {
     // Tap = finger barely moved AND wheel didn't rotate (accum reset to 0 on start)
     if (moved < 12 && wheel.accum === 0) { e.preventDefault(); action(); }
   }, { passive: false });
-  el.addEventListener('touchcancel', () => { el.classList.remove('pressed'); ts = null; }, { passive: true });
+  el.addEventListener('touchcancel', () => { ts = null; }, { passive: true });
   el.addEventListener('click', action); // desktop mouse clicks
 }
 
