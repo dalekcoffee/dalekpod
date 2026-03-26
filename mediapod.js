@@ -83,6 +83,12 @@ const state = {
   darkMode:    _darkMode,
   fullscreen:      false,
   hapticStrength:  localStorage.getItem('hapticStrength') || 'medium',
+  repeat:          localStorage.getItem('repeat')    || 'off', // 'off' | 'all' | 'one'
+  shuffle:         localStorage.getItem('shuffle')   === 'true',
+  crossfade:       clampInt(localStorage.getItem('crossfade'), 0, 10, 0), // seconds
+  sleepTimerId:    null,
+  sleepMins:       0,
+  sleepEndsAt:     null,
   theme: {
     uiHue:  clampInt(localStorage.getItem('themeUiHue'),  0, 359, 0),
     podHue: clampInt(localStorage.getItem('themePodHue'), 0, 359, 0),
@@ -700,10 +706,20 @@ function updatePositionState() {
 //  AUDIO
 // ═══════════════════════════════════════════
 let positionStateThrottle = 0;
+let _xfRaf = null; // crossfade animation frame
 
 state.audio.addEventListener('timeupdate', () => {
   state.progress = state.audio.currentTime;
   state.duration = state.audio.duration || 0;
+  // Crossfade fade-out approaching end of track
+  if (state.crossfade > 0 && state.duration > 0 && !_xfRaf) {
+    const remaining = state.duration - state.progress;
+    if (remaining > 0 && remaining <= state.crossfade) {
+      state.audio.volume = Math.max(0, remaining / state.crossfade);
+    } else if (state.audio.volume < 1) {
+      state.audio.volume = 1;
+    }
+  }
   if (state.view === 'nowplaying') renderNowPlaying();
   // Throttle position state updates to ~4× per second (enough for scrub bar on lock screen)
   const now = Date.now();
@@ -788,6 +804,21 @@ function playTrack(track, queue, index) {
     state.playing = false;
     if (state.view === 'nowplaying') renderNowPlaying();
   });
+  // Crossfade fade-in: start volume at 0 and ramp up
+  if (_xfRaf) { cancelAnimationFrame(_xfRaf); _xfRaf = null; }
+  if (state.crossfade > 0) {
+    state.audio.volume = 0;
+    const fadeMs = state.crossfade * 1000;
+    const startMs = performance.now();
+    function _fadeIn() {
+      const t = Math.min((performance.now() - startMs) / fadeMs, 1);
+      state.audio.volume = t;
+      if (t < 1) _xfRaf = requestAnimationFrame(_fadeIn); else _xfRaf = null;
+    }
+    _xfRaf = requestAnimationFrame(_fadeIn);
+  } else {
+    state.audio.volume = 1;
+  }
   state.view = 'nowplaying';
   updateMediaSession(track);
   scrobbleStart(track);
@@ -800,8 +831,19 @@ function togglePlay() {
 
 function nextTrack() {
   if (!state.queue.length) return;
-  state.queueIndex = (state.queueIndex + 1) % state.queue.length;
-  playTrack(state.queue[state.queueIndex], state.queue, state.queueIndex);
+  if (state.repeat === 'one') { state.audio.currentTime = 0; state.audio.play().catch(() => {}); return; }
+  let next;
+  if (state.shuffle) {
+    next = Math.floor(Math.random() * state.queue.length);
+  } else {
+    next = state.queueIndex + 1;
+    if (next >= state.queue.length) {
+      if (state.repeat === 'all') next = 0;
+      else { state.audio.volume = 1; return; } // end of queue
+    }
+  }
+  state.queueIndex = next;
+  playTrack(state.queue[next], state.queue, next);
 }
 
 function prevTrack() {
@@ -830,6 +872,53 @@ function playShuffled(tracks) {
   if (!tracks.length) return;
   const shuffled = [...tracks].sort(() => Math.random() - 0.5);
   playTrack(shuffled[0], shuffled, 0);
+}
+
+function toggleRepeat() {
+  const cycle = { off: 'all', all: 'one', one: 'off' };
+  state.repeat = cycle[state.repeat] || 'off';
+  localStorage.setItem('repeat', state.repeat);
+}
+
+function toggleShuffle() {
+  state.shuffle = !state.shuffle;
+  localStorage.setItem('shuffle', state.shuffle);
+}
+
+// ── Sleep timer ──────────────────────────────────────────────────────────────
+const SLEEP_OPTIONS = [0, 15, 30, 60, 90];
+function sleepLabel() {
+  return state.sleepMins ? `⏾ Sleep: ${state.sleepMins}m` : '⏾ Sleep Timer: Off';
+}
+function cycleSleep() {
+  if (state.sleepTimerId) { clearTimeout(state.sleepTimerId); state.sleepTimerId = null; }
+  const idx = SLEEP_OPTIONS.indexOf(state.sleepMins);
+  state.sleepMins  = SLEEP_OPTIONS[(idx + 1) % SLEEP_OPTIONS.length];
+  state.sleepEndsAt = state.sleepMins ? Date.now() + state.sleepMins * 60000 : null;
+  if (state.sleepMins) {
+    state.sleepTimerId = setTimeout(() => {
+      state.audio.pause();
+      state.sleepMins = 0; state.sleepEndsAt = null; state.sleepTimerId = null;
+    }, state.sleepMins * 60000);
+  }
+  const m = currentMenu();
+  const item = m?.items.find(i => i._id === 'sleep');
+  if (item) { item.label = sleepLabel(); render(); }
+}
+
+// ── Crossfade ─────────────────────────────────────────────────────────────────
+const CROSSFADE_OPTIONS = [0, 2, 5, 10];
+function crossfadeLabel() {
+  return state.crossfade === 0 ? '🎵 Crossfade: Off' : `🎵 Crossfade: ${state.crossfade}s`;
+}
+function cycleCrossfade() {
+  const idx = CROSSFADE_OPTIONS.indexOf(state.crossfade);
+  state.crossfade = CROSSFADE_OPTIONS[(idx + 1) % CROSSFADE_OPTIONS.length];
+  localStorage.setItem('crossfade', state.crossfade);
+  if (state.crossfade === 0) { if (_xfRaf) { cancelAnimationFrame(_xfRaf); _xfRaf = null; } state.audio.volume = 1; }
+  const m = currentMenu();
+  const item = m?.items.find(i => i._id === 'crossfade');
+  if (item) { item.label = crossfadeLabel(); render(); }
 }
 
 function goBack() {
@@ -928,7 +1017,9 @@ function openSettings() {
       { _id: 'lb', label: state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off', arrow: true, action: () => {
           state.view = 'lbsetup'; render();
       }},
-      { _id: 'haptic', label: hapticLabel(), arrow: false, action: cycleHaptic },
+      { _id: 'haptic',     label: hapticLabel(),     arrow: false, action: cycleHaptic },
+      { _id: 'sleep',      label: sleepLabel(),      arrow: false, action: cycleSleep },
+      { _id: 'crossfade',  label: crossfadeLabel(),  arrow: false, action: cycleCrossfade },
       { _id: 'fullscreen', label: state.fullscreen ? '✕ Exit Fullscreen' : '⛶ Fullscreen', arrow: false, action: () => {
           toggleFullscreen();
       }},
@@ -1683,10 +1774,13 @@ function renderNowPlaying(screen) {
     const fill  = el.querySelector('.np-progress-fill');
     const times = el.querySelector('.np-times');
     const play  = el.querySelector('#np-play');
-    if (fill)  fill.style.width  = pct + '%';
-    if (times) times.innerHTML   =
+    const sleep = el.querySelector('#np-sleep');
+    if (fill)  fill.style.width = pct + '%';
+    if (times) times.innerHTML  =
       `<span>${formatTime(state.progress)}</span><span>-${formatTime(state.duration - state.progress)}</span>`;
-    if (play)  play.innerHTML    = playIcon;
+    if (play)  play.innerHTML   = playIcon;
+    if (sleep) sleep.textContent = state.sleepEndsAt
+      ? `⏾ ${Math.max(1, Math.ceil((state.sleepEndsAt - Date.now()) / 60000))}m` : '';
     return;
   }
 
@@ -1702,7 +1796,7 @@ function renderNowPlaying(screen) {
       </div>
       <div class="np-info">
         <div class="np-song marquee"><span>${esc(t.title)}</span></div>
-        <div class="np-artist marquee"><span>${esc(t.grandparentTitle || '')}</span></div>
+        <div class="np-artist marquee${t.grandparentRatingKey ? ' np-tappable' : ''}"><span>${esc(t.grandparentTitle || '')}</span></div>
         <div class="np-album">${esc(t.parentTitle || '')}</div>
       </div>
       <div class="np-progress-area">
@@ -1719,6 +1813,11 @@ function renderNowPlaying(screen) {
         <span class="np-ctrl-btn play-pause" id="np-play">${playIcon}</span>
         <span class="np-ctrl-btn" id="np-next">⏭</span>
       </div>
+      <div class="np-controls-2">
+        <span class="np-ctrl-btn np-ctrl-sm${state.shuffle ? ' np-active' : ''}" id="np-shuffle">⇄</span>
+        <span class="np-ctrl-btn np-ctrl-sm${state.repeat !== 'off' ? ' np-active' : ''}" id="np-repeat">${state.repeat === 'one' ? '↺¹' : '↺'}</span>
+        <span class="np-sleep-badge" id="np-sleep">${state.sleepEndsAt ? `⏾ ${Math.max(1, Math.ceil((state.sleepEndsAt - Date.now()) / 60000))}m` : ''}</span>
+      </div>
       <div id="scrub-indicator">◁◁ &nbsp; SCRUBBING &nbsp; ▷▷</div>
     </div>`;
 
@@ -1729,6 +1828,20 @@ function renderNowPlaying(screen) {
   el.querySelector('#np-play').addEventListener('click', togglePlay);
   el.querySelector('#np-prev').addEventListener('click', prevTrack);
   el.querySelector('#np-next').addEventListener('click', nextTrack);
+  el.querySelector('#np-shuffle').addEventListener('click', () => {
+    toggleShuffle();
+    el.querySelector('#np-shuffle')?.classList.toggle('np-active', state.shuffle);
+  });
+  el.querySelector('#np-repeat').addEventListener('click', () => {
+    toggleRepeat();
+    const btn = el.querySelector('#np-repeat');
+    if (btn) { btn.classList.toggle('np-active', state.repeat !== 'off'); btn.innerHTML = state.repeat === 'one' ? '↺¹' : '↺'; }
+  });
+  const artistEl = el.querySelector('.np-tappable');
+  if (artistEl && t.grandparentRatingKey) {
+    artistEl.style.cursor = 'pointer';
+    artistEl.addEventListener('click', () => { vibe(HAPTIC.select); openArtistAlbums(t.grandparentRatingKey, t.grandparentTitle || 'Artist'); });
+  }
   const thumbImg = el.querySelector('#np-thumb');
   if (thumbImg) {
     thumbImg.addEventListener('error', () => {
@@ -2092,4 +2205,26 @@ if (hasPlex) {
   }).catch(() => { state.connStatus = 'disconnected'; state.view = 'setup'; render(); });
 } else {
   render();
+}
+
+// ═══════════════════════════════════════════
+//  CLOCK
+// ═══════════════════════════════════════════
+function updateClock() {
+  const el = document.getElementById('clock');
+  if (!el) return;
+  const d  = new Date();
+  const h  = ((d.getHours() % 12) || 12).toString();
+  const m  = d.getMinutes().toString().padStart(2, '0');
+  const ap = d.getHours() >= 12 ? 'PM' : 'AM';
+  el.textContent = `${h}:${m} ${ap}`;
+}
+setInterval(updateClock, 10000);
+updateClock();
+
+// ═══════════════════════════════════════════
+//  SERVICE WORKER
+// ═══════════════════════════════════════════
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
