@@ -835,8 +835,9 @@ function playShuffled(tracks) {
 function goBack() {
   if (state.view === 'nowplaying') { state.view = 'menu'; render(); return; }
   if (state.view === 'lbsetup')    { state.view = 'menu'; render(); return; }
-  if (state.view === 'coverflow')  { if (cfAnim.raf) { cancelAnimationFrame(cfAnim.raf); cfAnim.raf = null; } state.view = 'menu'; render(); return; }
-  if (state.navStack.length > 1) { state.navStack.pop(); render(); }
+  if (state.view === 'coverflow')  { if (cfAnim.raf) { cancelAnimationFrame(cfAnim.raf); cfAnim.raf = null; } state.returnToCoverFlow = false; state.view = 'menu'; render(); return; }
+  if (state.navStack.length > 1) { state.navStack.pop(); render(); return; }
+  if (state.returnToCoverFlow) { state.returnToCoverFlow = false; state.view = 'coverflow'; render(); }
 }
 
 /** Push a menu onto the nav stack and render it */
@@ -1046,6 +1047,7 @@ function cfOpenCurrentAlbum() {
   const album = state.coverFlowAlbums[state.coverFlowIndex];
   if (!album) return;
   vibe(HAPTIC.select);
+  state.returnToCoverFlow = true;
   openAlbumTracks(album.ratingKey, album.title);
 }
 
