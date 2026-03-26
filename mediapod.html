@@ -84,14 +84,11 @@ body.fullscreen { background: #000; }
   background: #111; border-radius: 10px; padding: 4px;
   box-shadow: var(--bezel-shadow);
   margin-bottom: 20px;
-  position: relative;
 }
-#clock {
-  position: absolute; top: 7px; right: 9px;
-  font-size: 9px; font-weight: 500; letter-spacing: 0.02em;
-  color: rgba(255,255,255,0.55); pointer-events: none; z-index: 50;
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+.titlebar-clock {
+  font-size: 9px; font-weight: 500; color: rgba(255,255,255,0.75);
+  font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+  min-width: 36px; flex-shrink: 0;
 }
 
 .screen {
@@ -268,8 +265,8 @@ body.fullscreen { background: #000; }
 .np-ctrl-btn { font-size: 14px; color: var(--ctrl-color); cursor: pointer; padding: 2px; opacity: 0.8; transition: color 0.3s, opacity 0.15s; -webkit-tap-highlight-color: transparent; }
 .np-ctrl-btn:hover { opacity: 1; }
 .np-ctrl-btn.play-pause { font-size: 18px; }
-.np-controls-2 { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 1px 0; flex-shrink: 0; }
-.np-ctrl-sm { font-size: 11px !important; opacity: 0.45; }
+.np-controls-2 { display: flex; align-items: center; justify-content: center; gap: 24px; padding: 2px 0; flex-shrink: 0; }
+.np-ctrl-sm { font-size: 13px !important; opacity: 0.55; }
 .np-active { opacity: 1 !important; color: #4a9eff !important; }
 .np-tappable { cursor: pointer; }
 .np-tappable span { border-bottom: 1px dotted currentColor; }
@@ -555,10 +552,10 @@ body.native .np-times { font-size: clamp(10px, 2.4vw, 15px); }
 body.native .np-controls { gap: clamp(20px, 8vw, 52px); padding: clamp(4px,1.2vh,10px) 0; margin-bottom: auto; }
 body.native .np-ctrl-btn { font-size: clamp(18px, 5vw, 32px); }
 body.native .np-ctrl-btn.play-pause { font-size: clamp(26px, 7vw, 44px); }
-body.native .np-controls-2 { gap: clamp(18px, 7vw, 44px); }
-body.native .np-ctrl-sm { font-size: clamp(14px, 4vw, 24px) !important; }
+body.native .np-controls-2 { gap: clamp(28px, 9vw, 56px); }
+body.native .np-ctrl-sm { font-size: clamp(18px, 5vw, 30px) !important; }
 body.native .np-sleep-badge { font-size: clamp(10px, 2.5vw, 14px); }
-body.native #clock { font-size: clamp(10px, 2.5vw, 14px); }
+body.native .titlebar-clock { font-size: clamp(10px, 2.5vw, 14px); }
 
 /* Setup screen */
 body.native .setup-screen { gap: 10px; padding: 20px 24px; }
@@ -800,7 +797,6 @@ body.native .spinner { width: 28px; height: 28px; border-width: 3px; }
   <div class="ipod">
     <div class="screen-bezel">
       <div class="screen" id="screen"></div>
-      <div id="clock"></div>
     </div>
     <div class="wheel-area">
       <div class="clickwheel" id="clickwheel">
