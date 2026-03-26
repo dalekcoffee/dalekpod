@@ -1376,7 +1376,9 @@ function renderNowPlaying(screen) {
   if (!state.currentTrack) return;
   const t = state.currentTrack;
   const pct = state.duration > 0 ? (state.progress / state.duration) * 100 : 0;
-  const playIcon = state.playing ? '⏸\uFE0E' : '▶';
+  const playIcon = state.playing
+    ? '<svg width="0.65em" height="0.8em" viewBox="0 0 7 9" style="display:inline-block;vertical-align:-0.05em"><rect x="0" y="0" width="2.5" height="9" rx="0.4" fill="currentColor"/><rect x="4.5" y="0" width="2.5" height="9" rx="0.4" fill="currentColor"/></svg>'
+    : '▶';
 
   // ── Lightweight tick: only update progress if full structure already exists ──
   if (!screen && el.querySelector('.nowplaying-screen')) {
@@ -1386,7 +1388,7 @@ function renderNowPlaying(screen) {
     if (fill)  fill.style.width  = pct + '%';
     if (times) times.innerHTML   =
       `<span>${formatTime(state.progress)}</span><span>-${formatTime(state.duration - state.progress)}</span>`;
-    if (play)  play.textContent  = playIcon;
+    if (play)  play.innerHTML    = playIcon;
     return;
   }
 
@@ -1562,8 +1564,6 @@ function commitScrub() {
 function onRimStart(e) {
   const rect = cwEl.getBoundingClientRect();
   if (!isOnRim(e, rect)) return;
-  // If the touch landed on a zone button, let it bubble through as a click
-  if (e.target && e.target.closest('.wheel-zone')) return;
   e.preventDefault();
   cancelMomentum();
   wheel.active    = true;
@@ -1671,20 +1671,31 @@ cwEl.addEventListener('wheel', e => {
 }, { passive: false });
 
 // ── Zone buttons (cardinal quadrants) ──
-document.getElementById('zone-top').addEventListener('click', () => {
-  vibe(HAPTIC.back); goBack();
-});
-document.getElementById('zone-bottom').addEventListener('click', () => {
-  if (state.currentTrack) { vibe(HAPTIC.select); togglePlay(); }
-});
-document.getElementById('zone-left').addEventListener('click', () => {
-  vibe(HAPTIC.tick);
-  if (state.view === 'nowplaying') prevTrack(); else scrollMenu(-1);
-});
-document.getElementById('zone-right').addEventListener('click', () => {
-  vibe(HAPTIC.tick);
-  if (state.view === 'nowplaying') nextTrack(); else scrollMenu(1);
-});
+// addZoneTap: direct touchstart/touchend handlers so that e.preventDefault()
+// on the rim's touchstart doesn't swallow the tap. Click handler kept for desktop.
+function addZoneTap(id, action) {
+  const el = document.getElementById(id);
+  let ts = null;
+  el.addEventListener('touchstart', e => {
+    e.stopPropagation(); // prevent onRimStart from seeing this touch
+    ts = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, { passive: true });
+  el.addEventListener('touchend', e => {
+    if (!ts) return;
+    const moved = Math.hypot(
+      e.changedTouches[0].clientX - ts.x,
+      e.changedTouches[0].clientY - ts.y
+    );
+    ts = null;
+    if (moved < 12) { e.preventDefault(); action(); }
+  }, { passive: false });
+  el.addEventListener('click', action);
+}
+
+addZoneTap('zone-top',    () => { vibe(HAPTIC.back); goBack(); });
+addZoneTap('zone-bottom', () => { if (state.currentTrack) { vibe(HAPTIC.select); togglePlay(); } });
+addZoneTap('zone-left',   () => { vibe(HAPTIC.tick); if (state.view === 'nowplaying') prevTrack();  else scrollMenu(-1); });
+addZoneTap('zone-right',  () => { vibe(HAPTIC.tick); if (state.view === 'nowplaying') nextTrack(); else scrollMenu(1);  });
 document.getElementById('wheel-center').addEventListener('click', () => {
   if (state.view === 'menu')           { vibe(HAPTIC.select); selectItem(); }
   else if (state.view === 'nowplaying') { vibe(HAPTIC.select); togglePlay(); }
