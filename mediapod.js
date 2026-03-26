@@ -1671,14 +1671,16 @@ cwEl.addEventListener('wheel', e => {
 }, { passive: false });
 
 // ── Zone buttons (cardinal quadrants) ──
-// addZoneTap: direct touchstart/touchend handlers so that e.preventDefault()
-// on the rim's touchstart doesn't swallow the tap. Click handler kept for desktop.
+// Zones overlap the rim, so onRimStart sees their touches and calls preventDefault,
+// suppressing synthetic clicks. We handle taps directly in touchend by checking
+// that the finger barely moved AND the wheel accumulated no rotation (not a drag).
+// The click handler covers desktop mouse clicks where no touch events fire.
 function addZoneTap(id, action) {
   const el = document.getElementById(id);
   let ts = null;
   el.addEventListener('touchstart', e => {
-    e.stopPropagation(); // prevent onRimStart from seeing this touch
     ts = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    // Do NOT stopPropagation — rim must still receive drag gestures
   }, { passive: true });
   el.addEventListener('touchend', e => {
     if (!ts) return;
@@ -1687,9 +1689,10 @@ function addZoneTap(id, action) {
       e.changedTouches[0].clientY - ts.y
     );
     ts = null;
-    if (moved < 12) { e.preventDefault(); action(); }
+    // Tap = finger barely moved AND wheel didn't rotate (accum reset to 0 on start)
+    if (moved < 12 && wheel.accum === 0) { e.preventDefault(); action(); }
   }, { passive: false });
-  el.addEventListener('click', action);
+  el.addEventListener('click', action); // desktop mouse clicks
 }
 
 addZoneTap('zone-top',    () => { vibe(HAPTIC.back); goBack(); });
