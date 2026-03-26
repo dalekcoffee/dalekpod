@@ -1336,20 +1336,22 @@ function renderPlexServerPicker(servers, token) {
 }
 
 async function connectToPlexServer(server, token) {
-  // With CORS proxy available on desktop, prefer direct connections (fastest).
-  // Without proxy (mobile), prefer relay connections which go through Plex
-  // infrastructure with permissive CORS. Local connections always tried.
-  const conns = [...server.connections].sort((a, b) => {
-    const score = c => {
-      if (_needsProxy) {
-        // Proxy handles CORS — prefer direct non-relay, then relay
-        return (c.local ? 0 : 1) + (c.relay ? 2 : 0) + (c.protocol === 'https' ? 0 : 1);
-      }
-      // No proxy — prefer relay (CORS-safe), then direct
-      return (c.relay ? 0 : 2) + (c.local ? 0 : 1) + (c.protocol === 'https' ? 0 : 1);
-    };
-    return score(a) - score(b);
-  });
+  // With CORS proxy available on desktop, prefer remote/relay connections.
+  // The proxy can't reach LAN IPs (192.168.x.x) — skip local when proxied.
+  // Without proxy (mobile), prefer relay for CORS, then try local/direct.
+  const conns = [...server.connections]
+    .filter(c => !(_needsProxy && c.local)) // proxy can't reach LAN
+    .sort((a, b) => {
+      const score = c => {
+        if (_needsProxy) {
+          // Proxy: prefer relay (Plex infra, most reliable), then direct remote
+          return (c.relay ? 0 : 1) + (c.protocol === 'https' ? 0 : 1);
+        }
+        // No proxy — prefer relay (CORS-safe), then direct
+        return (c.relay ? 0 : 2) + (c.local ? 0 : 1) + (c.protocol === 'https' ? 0 : 1);
+      };
+      return score(a) - score(b);
+    });
 
   let lastErr = 'All connections failed';
   for (const conn of conns) {
@@ -1359,8 +1361,8 @@ async function connectToPlexServer(server, token) {
     try {
       const test = await proxiedFetch(
         `${url}/`,
-        { headers: { Accept: 'application/json', 'X-Plex-Token': token } },
-        4000
+        { headers: { ...PLEX_HEADERS, Accept: 'application/json', 'X-Plex-Token': token } },
+        6000
       );
       if (!test.ok) continue;
       // Validate token format before storing — defense in depth
