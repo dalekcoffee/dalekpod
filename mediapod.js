@@ -81,7 +81,7 @@ const state = {
   duration:    0,
   view:        'setup',
   darkMode:    _darkMode,
-  fullscreen:  true,
+  fullscreen:  false,
   theme: {
     uiHue:  clampInt(localStorage.getItem('themeUiHue'),  0, 359, 0),
     podHue: clampInt(localStorage.getItem('themePodHue'), 0, 359, 0),
@@ -1117,7 +1117,7 @@ function cfAnimFrame() {
     cfUpdateInfo();
     return;
   }
-  cfAnim.offset += diff * 0.25; // spring: lerp 25% of remaining gap per frame
+  cfAnim.offset += diff * 0.16; // spring: lerp 16% of remaining gap per frame (smoother)
   cfApplyTransforms();
   cfUpdateInfo();
   cfAnim.raf = requestAnimationFrame(cfAnimFrame);
@@ -1732,10 +1732,10 @@ function renderNowPlaying(screen) {
 // ═══════════════════════════════════════════
 const vibe = (p) => { try { navigator.vibrate?.(p); } catch(_) {} };
 const HAPTIC = {
-  tick:     10,           // menu step — single short pulse
-  select:   [15, 30, 15], // SELECT press
-  back:     [8, 20, 8],   // MENU / back
-  boundary: [20, 30, 20], // hit list edge
+  tick:     20,           // menu step — single short pulse
+  select:   [20, 40, 20], // SELECT press
+  back:     [15, 30, 15], // MENU / back
+  boundary: [30, 40, 30], // hit list edge
   scrubTick: 1,         // scrub position tick
 };
 
@@ -2049,12 +2049,6 @@ applyDarkMode();      // sets dark-mode class + calls applySetupBranding
 initThemePanel();     // wires up hue rings, presets, reset
 autoScale();          // scale iPod to fill viewport immediately
 
-// Default fullscreen — apply CSS class immediately; request native API on first gesture
-document.body.classList.add('fullscreen');
-(function() {
-  function _tryFullscreen() { document.documentElement.requestFullscreen?.().catch(() => {}); }
-  document.addEventListener('pointerdown', _tryFullscreen, { once: true, passive: true });
-})();
 
 const hasPlex = state.plexUrl && state.plexToken;
 
