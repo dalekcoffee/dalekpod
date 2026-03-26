@@ -81,7 +81,7 @@ const state = {
   duration:    0,
   view:        'setup',
   darkMode:    _darkMode,
-  fullscreen:  false,
+  fullscreen:  true,
   theme: {
     uiHue:  clampInt(localStorage.getItem('themeUiHue'),  0, 359, 0),
     podHue: clampInt(localStorage.getItem('themePodHue'), 0, 359, 0),
@@ -1767,6 +1767,26 @@ function startMomentum(initialVelDegPerSec) {
   wheel.momentumRaf = requestAnimationFrame(frame);
 }
 
+function startCfMomentum(initialVelDegPerSec) {
+  cancelMomentum();
+  let vel = initialVelDegPerSec;
+  let accum = 0;
+  function frame() {
+    if (Math.abs(vel) < MOMENTUM_MIN_VEL || state.view !== 'coverflow') return;
+    accum += vel / 60;
+    const ticks = Math.trunc(accum / DEG_PER_MENU_TICK);
+    if (ticks !== 0) {
+      accum -= ticks * DEG_PER_MENU_TICK;
+      const prev = state.coverFlowIndex;
+      cfNavigate(ticks);
+      if (state.coverFlowIndex === prev) return; // hit boundary — stop
+    }
+    vel *= MOMENTUM_FRICTION;
+    wheel.momentumRaf = requestAnimationFrame(frame);
+  }
+  wheel.momentumRaf = requestAnimationFrame(frame);
+}
+
 // ── Scrub mode ──
 function enterScrubMode() {
   if (wheel.scrubMode) return;
@@ -1872,13 +1892,16 @@ function onRimEnd(e) {
   if (wheel.scrubMode) { commitScrub(); return; }
 
   // Momentum for menu — compute angular velocity from recent buffer
-  if (state.view === 'menu' && wheel.velBuf.length >= 2) {
+  if (wheel.velBuf.length >= 2) {
     const f = wheel.velBuf[0];
     const l = wheel.velBuf[wheel.velBuf.length - 1];
     const dt = (l.ts - f.ts) / 1000;
     if (dt > 0.01) {
       const vel = angleDiff(l.angle, f.angle) / dt;
-      if (Math.abs(vel) > MOMENTUM_MIN_VEL * 2) startMomentum(vel);
+      if (Math.abs(vel) > MOMENTUM_MIN_VEL * 2) {
+        if (state.view === 'menu')       startMomentum(vel);
+        else if (state.view === 'coverflow') startCfMomentum(vel);
+      }
     }
   }
 }
@@ -1901,6 +1924,8 @@ cwEl.addEventListener('wheel', e => {
   if (state.view === 'menu') {
     scrollMenu(e.deltaY > 0 ? 1 : -1);
     vibe(HAPTIC.tick);
+  } else if (state.view === 'coverflow') {
+    cfNavigate(e.deltaY > 0 ? 1 : -1);
   } else if (state.view === 'nowplaying' && state.duration > 0) {
     const skip = e.deltaY > 0 ? 5 : -5;
     state.audio.currentTime = Math.max(0, Math.min(state.duration, state.audio.currentTime + skip));
@@ -1918,9 +1943,11 @@ function addZoneTap(id, action) {
   let ts = null;
   el.addEventListener('touchstart', e => {
     ts = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    el.classList.add('pressed');
     // Do NOT stopPropagation — rim must still receive drag gestures
   }, { passive: true });
   el.addEventListener('touchend', e => {
+    el.classList.remove('pressed');
     if (!ts) return;
     const moved = Math.hypot(
       e.changedTouches[0].clientX - ts.x,
@@ -1930,6 +1957,7 @@ function addZoneTap(id, action) {
     // Tap = finger barely moved AND wheel didn't rotate (accum reset to 0 on start)
     if (moved < 12 && wheel.accum === 0) { e.preventDefault(); action(); }
   }, { passive: false });
+  el.addEventListener('touchcancel', () => { el.classList.remove('pressed'); ts = null; }, { passive: true });
   el.addEventListener('click', action); // desktop mouse clicks
 }
 
@@ -1971,6 +1999,13 @@ document.addEventListener('keydown', e => {
 applyDarkMode();      // sets dark-mode class + calls applySetupBranding
 initThemePanel();     // wires up hue rings, presets, reset
 autoScale();          // scale iPod to fill viewport immediately
+
+// Default fullscreen — apply CSS class immediately; request native API on first gesture
+document.body.classList.add('fullscreen');
+(function() {
+  function _tryFullscreen() { document.documentElement.requestFullscreen?.().catch(() => {}); }
+  document.addEventListener('pointerdown', _tryFullscreen, { once: true, passive: true });
+})();
 
 const hasPlex = state.plexUrl && state.plexToken;
 
