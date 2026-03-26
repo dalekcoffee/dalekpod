@@ -548,10 +548,37 @@ document.getElementById('tp-backdrop').addEventListener('click', closeThemePanel
 // ═══════════════════════════════════════════
 //  PLEX API
 // ═══════════════════════════════════════════
+
+// CORS proxy — Plex servers only allow origin https://app.plex.tv.
+// On desktop browsers this blocks all fetch() calls from our custom domain.
+// A lightweight Cloudflare Worker (see cloudflare-worker.js) relays requests
+// and rewrites the CORS header. Mobile PWAs work without it (same-origin or
+// relaxed CORS in standalone mode). Set to '' to disable.
+const PLEX_PROXY_ORIGIN = 'https://plex-proxy.dalek.coffee';
+
+// True when the proxy is needed (desktop browser, not localhost dev)
+const _needsProxy = !window.matchMedia('(pointer: coarse)').matches
+  && PLEX_PROXY_ORIGIN
+  && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+
 function fetchWithTimeout(url, opts = {}, ms = 8000) {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), ms);
   return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(tid));
+}
+
+/**
+ * Fetch via CORS proxy when needed. Sends the real URL in X-Proxy-URL header
+ * and targets the proxy origin instead. Falls through to direct fetch on mobile
+ * or when no proxy is configured.
+ */
+function proxiedFetch(url, opts = {}, ms = 8000) {
+  if (_needsProxy) {
+    const proxyUrl = `${PLEX_PROXY_ORIGIN}/`;
+    const headers = { ...(opts.headers || {}), 'X-Proxy-URL': url };
+    return fetchWithTimeout(proxyUrl, { ...opts, headers }, ms);
+  }
+  return fetchWithTimeout(url, opts, ms);
 }
 
 // Safe JSON parse — verifies Content-Type before parsing to avoid confusing
@@ -568,7 +595,7 @@ async function plexFetch(path) {
   if (state.plexToken.length > 512) { handleSessionExpiry(); throw new Error('Invalid session token.'); }
   const sep = path.includes('?') ? '&' : '?';
   const url = `${state.plexUrl}${path}${sep}X-Plex-Client-Identifier=${encodeURIComponent(PLEX_CLIENT_ID)}`;
-  const res = await fetchWithTimeout(url, {
+  const res = await proxiedFetch(url, {
     headers: { Accept: 'application/json', 'X-Plex-Token': state.plexToken }
   });
   if (res.status === 401) { handleSessionExpiry(); throw new Error('Session expired. Please sign in again.'); }
@@ -1309,12 +1336,18 @@ function renderPlexServerPicker(servers, token) {
 }
 
 async function connectToPlexServer(server, token) {
-  // When served from a custom domain, direct *.plex.direct connections are
-  // blocked by CORS (Plex only allows app.plex.tv). Prefer relay connections
-  // first — they go through Plex's own infrastructure which allows any origin.
-  // Fall back to direct connections for local/self-hosted setups.
+  // With CORS proxy available on desktop, prefer direct connections (fastest).
+  // Without proxy (mobile), prefer relay connections which go through Plex
+  // infrastructure with permissive CORS. Local connections always tried.
   const conns = [...server.connections].sort((a, b) => {
-    const score = c => (c.relay ? 0 : 2) + (c.local ? 0 : 1) + (c.protocol === 'https' ? 0 : 1);
+    const score = c => {
+      if (_needsProxy) {
+        // Proxy handles CORS — prefer direct non-relay, then relay
+        return (c.local ? 0 : 1) + (c.relay ? 2 : 0) + (c.protocol === 'https' ? 0 : 1);
+      }
+      // No proxy — prefer relay (CORS-safe), then direct
+      return (c.relay ? 0 : 2) + (c.local ? 0 : 1) + (c.protocol === 'https' ? 0 : 1);
+    };
     return score(a) - score(b);
   });
 
@@ -1324,7 +1357,7 @@ async function connectToPlexServer(server, token) {
     // Skip non-http(s) URIs — fetch doesn't execute them but avoids unexpected behaviour
     if (!isValidUrl(url)) continue;
     try {
-      const test = await fetchWithTimeout(
+      const test = await proxiedFetch(
         `${url}/`,
         { headers: { Accept: 'application/json', 'X-Plex-Token': token } },
         4000
