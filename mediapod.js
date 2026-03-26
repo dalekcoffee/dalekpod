@@ -61,6 +61,7 @@ const state = {
   jellyfinUrl:    localStorage.getItem('jellyfinUrl')    || '',
   jellyfinApiKey: localStorage.getItem('jellyfinApiKey') || '',
   jellyfinUserId: localStorage.getItem('jellyfinUserId') || '',
+  lbToken:        localStorage.getItem('lbToken')        || '',
   connected:   false,
   connStatus:  'disconnected', // 'connecting' | 'connected' | 'disconnected'
   navStack:    [],
@@ -341,7 +342,7 @@ function autoScale() {
     rs.setProperty('--native-wheel-size', wheelSize  + 'px');
     rs.setProperty('--native-center-size',centerSize + 'px');
     rs.setProperty('--native-wheel-font', Math.max(9, Math.round(wheelSize * 0.052)) + 'px');
-    rs.setProperty('--native-art-size',   Math.min(Math.round(vw * 0.30), 180) + 'px');
+    rs.setProperty('--native-art-size',   Math.min(Math.round(vw * 0.52), 240) + 'px');
   } else {
     // ── Desktop: scale the iPod shell to fit ─────────────────────
     document.body.classList.remove('native');
@@ -747,7 +748,52 @@ state.audio.addEventListener('loadedmetadata', () => {
   updatePositionState();
 });
 
+// ── ListenBrainz scrobbling ──
+let _lbTimer = null;
+
+async function lbSubmit(listenType, track, listenedAt) {
+  if (!state.lbToken) return;
+  const body = {
+    listen_type: listenType,
+    payload: [{
+      ...(listenedAt != null ? { listened_at: listenedAt } : {}),
+      track_metadata: {
+        artist_name:  track.grandparentTitle || '',
+        track_name:   track.title            || '',
+        release_name: track.parentTitle      || ''
+      }
+    }]
+  };
+  try {
+    await fetch('https://api.listenbrainz.org/1/submit-listens', {
+      method: 'POST',
+      headers: { 'Authorization': `Token ${state.lbToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  } catch (_) {} // silent fail — never interrupt playback
+}
+
+function scrobbleStart(track) {
+  clearTimeout(_lbTimer);
+  if (!state.lbToken) return;
+  const listenedAt = Math.floor(Date.now() / 1000);
+  lbSubmit('playing_now', track);
+  // Schedule listen submit at 50% of duration or 4 minutes, whichever is sooner.
+  // Poll until duration is known (loadedmetadata may not have fired yet).
+  const arm = () => {
+    const dur = state.duration;
+    if (dur > 0) {
+      _lbTimer = setTimeout(() => lbSubmit('single', track, listenedAt),
+        Math.min(dur * 0.5, 240) * 1000);
+    } else {
+      _lbTimer = setTimeout(arm, 300);
+    }
+  };
+  arm();
+}
+
 function playTrack(track, queue, index) {
+  clearTimeout(_lbTimer); // cancel any pending scrobble for the previous track
   state.currentTrack = track;
   state.queue = queue; state.queueIndex = index;
   state.audio.src = getStreamUrl(track);
@@ -758,6 +804,7 @@ function playTrack(track, queue, index) {
   });
   state.view = 'nowplaying';
   updateMediaSession(track);
+  scrobbleStart(track);
   render();
 }
 
@@ -862,6 +909,16 @@ function openSettings() {
           render();
       }},
       { label: '🎨 Customize Theme', arrow: false, action: () => { openThemePanel(); }},
+      { _id: 'lb', label: state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off', arrow: false, action: () => {
+          const t = window.prompt(state.lbToken ? 'ListenBrainz token (clear to disable):' : 'Enter ListenBrainz user token:', state.lbToken);
+          if (t === null) return; // cancelled
+          const trimmed = t.trim();
+          state.lbToken = trimmed;
+          if (trimmed) localStorage.setItem('lbToken', trimmed);
+          else localStorage.removeItem('lbToken');
+          const item = currentMenu().items.find(i => i._id === 'lb');
+          if (item) { item.label = state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off'; render(); }
+      }},
       { _id: 'fullscreen', label: state.fullscreen ? '✕ Exit Fullscreen' : '⛶ Fullscreen', arrow: false, action: () => {
           toggleFullscreen();
       }},
@@ -917,7 +974,7 @@ async function openSongList(sectionKey, title) {
 }
 
 async function openPlaylists() {
-  await apiMenu('Loading playlists...', () => plexFetch('/playlists?type=audio'), d =>
+  await apiMenu('Loading playlists...', () => plexFetch('/playlists?playlistType=audio'), d =>
     (d.MediaContainer.Metadata || []).map(p => ({ label: p.title, arrow: true, action: () => openPlaylistTracks(p.ratingKey, p.title) })), 'Playlists');
 }
 
@@ -1335,7 +1392,7 @@ function renderSetup(screen) {
 function renderMenu(screen) {
   if (!currentMenu()) state.navStack = [buildMainMenu()];
   const m = currentMenu();
-  const VISIBLE = 6;
+  const VISIBLE = document.body.classList.contains('native') ? 20 : 6;
   const total = m.items.length;
   let start = Math.max(0, m.selectedIndex - 2);
   if (start + VISIBLE > total) start = Math.max(0, total - VISIBLE);
