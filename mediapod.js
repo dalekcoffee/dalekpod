@@ -608,7 +608,7 @@ function normalizeJfTrack(item) {
     title:            item.Name         || 'Unknown',
     grandparentTitle: item.AlbumArtist  || item.Artists?.[0] || '',
     parentTitle:      item.Album        || '',
-    _thumbUrl:  jellyfinThumb(item.AlbumId || item.Id, 160),
+    _thumbUrl:  jellyfinThumb(item.AlbumId || item.Id, 480),
     _streamUrl: jellyfinStream(item.Id),
   };
 }
@@ -1549,8 +1549,8 @@ function renderNowPlaying(screen) {
   }
 
   // ── Full build (first render, track change, or explicit screen arg) ──
-  const thumb   = getThumb(t, 160);
-  const bgThumb = getThumb(t, 400); // larger for better blur quality
+  const thumb   = getThumb(t, 480);
+  const bgThumb = getThumb(t, 800); // larger for better blur quality
   el.innerHTML = `
     <div class="nowplaying-screen${bgThumb ? ' has-blur' : ''}">
       ${bgThumb ? `<div class="np-bg-blur" style="background-image:url('${esc(bgThumb)}')"></div>` : ''}
