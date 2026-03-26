@@ -890,6 +890,11 @@ const SLEEP_OPTIONS = [0, 15, 30, 60, 90];
 function sleepLabel() {
   return state.sleepMins ? `⏾ Sleep: ${state.sleepMins}m` : '⏾ Sleep Timer: Off';
 }
+function sleepStatusHtml() {
+  if (!state.sleepEndsAt) return '';
+  const mins = Math.max(1, Math.ceil((state.sleepEndsAt - Date.now()) / 60000));
+  return ` <span class="sleep-status-badge">⏾ ${mins}m</span>`;
+}
 function cycleSleep() {
   if (state.sleepTimerId) { clearTimeout(state.sleepTimerId); state.sleepTimerId = null; }
   const idx = SLEEP_OPTIONS.indexOf(state.sleepMins);
@@ -1277,7 +1282,7 @@ function renderCoverFlow(screen) {
     <div class="coverflow-screen" style="--cf-size:${cfSize}px">
       <div class="menu-titlebar">
         <div class="title">Cover Flow</div>
-        <div class="conn-status ${state.connStatus}">${idx + 1} / ${albums.length}</div>
+        <div class="conn-status ${state.connStatus}">${idx + 1} / ${albums.length}${sleepStatusHtml()}</div>
       </div>
       <div class="cf-stage">${itemsHtml}</div>
       <div class="cf-info">
@@ -1705,7 +1710,7 @@ function renderMenu(screen) {
         <div class="conn-status ${state.connStatus}">${
           state.connStatus === 'connected'   ? 'Connected'   :
           state.connStatus === 'connecting'  ? 'Connecting…' : 'Disconnected'
-        }</div>
+        }${sleepStatusHtml()}</div>
       </div>
       ${npBar}
       <div class="menu-list">${rows}</div>
