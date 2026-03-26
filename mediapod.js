@@ -52,16 +52,27 @@ const _serverType    = (_rawServerType === 'jellyfin') ? 'jellyfin' : 'plex';
 const _rawDarkMode = localStorage.getItem('darkMode');
 const _darkMode    = _rawDarkMode !== null ? _rawDarkMode === 'true' : true;
 
+// ── Validate stored URLs/tokens before trusting them ──
+const _storedPlexUrl    = localStorage.getItem('plexUrl')    || '';
+const _storedJfUrl      = localStorage.getItem('jellyfinUrl') || '';
+const _storedPlexToken  = localStorage.getItem('plexToken')  || '';
+const _storedJfApiKey   = localStorage.getItem('jellyfinApiKey') || '';
+const _storedJfUserId   = localStorage.getItem('jellyfinUserId') || '';
+const _storedLbToken    = localStorage.getItem('lbToken')        || '';
+
+const _tokenRe = /^[a-zA-Z0-9_-]+$/;
+const _uuidRe  = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+
 const state = {
   serverType: _serverType,
-  plexUrl:    localStorage.getItem('plexUrl')    || '',
-  plexToken:  localStorage.getItem('plexToken')  || '',
+  plexUrl:    isValidUrl(_storedPlexUrl) ? _storedPlexUrl : '',
+  plexToken:  _tokenRe.test(_storedPlexToken) ? _storedPlexToken : '',
   plexPinId:  null,
   plexPinPoll: null,
-  jellyfinUrl:    localStorage.getItem('jellyfinUrl')    || '',
-  jellyfinApiKey: localStorage.getItem('jellyfinApiKey') || '',
-  jellyfinUserId: localStorage.getItem('jellyfinUserId') || '',
-  lbToken:        localStorage.getItem('lbToken')        || '',
+  jellyfinUrl:    isValidUrl(_storedJfUrl) ? _storedJfUrl : '',
+  jellyfinApiKey: _tokenRe.test(_storedJfApiKey) ? _storedJfApiKey : '',
+  jellyfinUserId: _tokenRe.test(_storedJfUserId) ? _storedJfUserId : '',
+  lbToken:        _uuidRe.test(_storedLbToken) ? _storedLbToken : '',
   connected:   false,
   connStatus:  'disconnected', // 'connecting' | 'connected' | 'disconnected'
   navStack:    [],
@@ -1129,7 +1140,7 @@ function showMenuError(msg) {
 function showLoading(msg) {
   if (msg === 'Connecting...') state.connStatus = 'connecting';
   document.getElementById('screen').innerHTML =
-    `<div class="loading"><div class="spinner"></div><p>${msg}</p></div>`;
+    `<div class="loading"><div class="spinner"></div><p>${esc(msg)}</p></div>`;
 }
 
 // ═══════════════════════════════════════════
@@ -1508,6 +1519,12 @@ function renderLbSetup(screen) {
 
   screen.querySelector('#lb-save').addEventListener('click', () => {
     const token = screen.querySelector('#lb-input').value.trim();
+    // ListenBrainz tokens are UUIDs — validate before storing
+    if (token && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(token)) {
+      const err = screen.querySelector('#lb-input');
+      if (err) err.style.borderColor = '#e53030';
+      return;
+    }
     state.lbToken = token;
     if (token) localStorage.setItem('lbToken', token);
     else localStorage.removeItem('lbToken');
@@ -1553,7 +1570,7 @@ function renderNowPlaying(screen) {
   const bgThumb = getThumb(t, 800); // larger for better blur quality
   el.innerHTML = `
     <div class="nowplaying-screen${bgThumb ? ' has-blur' : ''}">
-      ${bgThumb ? `<div class="np-bg-blur" style="background-image:url('${esc(bgThumb)}')"></div>` : ''}
+      ${bgThumb ? '<div class="np-bg-blur"></div>' : ''}
       <div class="np-titlebar"><div class="title">Now Playing</div></div>
       <div class="np-art">
         ${thumb ? `<img id="np-thumb" src="${esc(thumb)}" referrerpolicy="no-referrer" />` : '<div class="no-art">♪</div>'}
@@ -1579,6 +1596,10 @@ function renderNowPlaying(screen) {
       </div>
       <div id="scrub-indicator">◁◁ &nbsp; SCRUBBING &nbsp; ▷▷</div>
     </div>`;
+
+  // Set blur background via DOM to avoid CSS injection through inline style
+  const blurDiv = el.querySelector('.np-bg-blur');
+  if (blurDiv && bgThumb) blurDiv.style.backgroundImage = `url("${bgThumb.replace(/["\\]/g, '\\$&')}")`;
 
   el.querySelector('#np-play').addEventListener('click', togglePlay);
   el.querySelector('#np-prev').addEventListener('click', prevTrack);
