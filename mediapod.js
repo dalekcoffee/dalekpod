@@ -86,7 +86,6 @@ const state = {
   repeat:          localStorage.getItem('repeat')    || 'off', // 'off' | 'all' | 'one'
   shuffle:         localStorage.getItem('shuffle')   === 'true',
   crossfade:       clampInt(localStorage.getItem('crossfade'), 0, 10, 0), // seconds
-  clock24h:        localStorage.getItem('clock24h') === 'true',
   sleepTimerId:    null,
   sleepMins:       0,
   sleepEndsAt:     null,
@@ -1027,13 +1026,6 @@ function openSettings() {
           state.view = 'lbsetup'; render();
       }},
       { _id: 'haptic',     label: hapticLabel(),     arrow: false, action: cycleHaptic },
-      { _id: 'clock24h', label: state.clock24h ? '🕐 Clock: 24h' : '🕐 Clock: 12h', arrow: false, action: () => {
-          state.clock24h = !state.clock24h;
-          localStorage.setItem('clock24h', state.clock24h);
-          updateClock();
-          const m = currentMenu(); const item = m?.items.find(i => i._id === 'clock24h');
-          if (item) { item.label = state.clock24h ? '🕐 Clock: 24h' : '🕐 Clock: 12h'; render(); }
-      }},
       { _id: 'sleep',      label: sleepLabel(),      arrow: false, action: cycleSleep },
       { _id: 'crossfade',  label: crossfadeLabel(),  arrow: false, action: cycleCrossfade },
       { _id: 'fullscreen', label: state.fullscreen ? '✕ Exit Fullscreen' : '⛶ Fullscreen', arrow: false, action: () => {
@@ -1284,7 +1276,6 @@ function renderCoverFlow(screen) {
   screen.innerHTML = `
     <div class="coverflow-screen" style="--cf-size:${cfSize}px">
       <div class="menu-titlebar">
-        <span class="titlebar-clock">${clockStr()}</span>
         <div class="title">Cover Flow</div>
         <div class="conn-status ${state.connStatus}">${idx + 1} / ${albums.length}</div>
       </div>
@@ -1710,7 +1701,6 @@ function renderMenu(screen) {
   screen.innerHTML = `
     <div class="menu-screen">
       <div class="menu-titlebar">
-        <span class="titlebar-clock">${clockStr()}</span>
         <div class="title">${esc(m.title)}</div>
         <div class="conn-status ${state.connStatus}">${
           state.connStatus === 'connected'   ? 'Connected'   :
@@ -1808,7 +1798,7 @@ function renderNowPlaying(screen) {
   el.innerHTML = `
     <div class="nowplaying-screen${bgThumb ? ' has-blur' : ''}">
       ${bgThumb ? '<div class="np-bg-blur"></div>' : ''}
-      <div class="np-titlebar"><span class="titlebar-clock">${clockStr()}</span><div class="title">Now Playing</div><span class="titlebar-clock"></span></div>
+      <div class="np-titlebar"><div class="title">Now Playing</div></div>
       <div class="np-art">
         ${thumb ? `<img id="np-thumb" src="${esc(thumb)}" referrerpolicy="no-referrer" />` : '<div class="no-art">♪</div>'}
       </div>
@@ -2225,23 +2215,6 @@ if (hasPlex) {
   render();
 }
 
-// ═══════════════════════════════════════════
-//  CLOCK
-// ═══════════════════════════════════════════
-function clockStr() {
-  const d = new Date();
-  const m = d.getMinutes().toString().padStart(2, '0');
-  if (state.clock24h) return `${d.getHours().toString().padStart(2, '0')}:${m}`;
-  const h  = ((d.getHours() % 12) || 12).toString();
-  const ap = d.getHours() >= 12 ? 'PM' : 'AM';
-  return `${h}:${m} ${ap}`;
-}
-
-function updateClock() {
-  document.querySelectorAll('.titlebar-clock').forEach(el => { el.textContent = clockStr(); });
-}
-setInterval(updateClock, 10000);
-updateClock();
 
 // ═══════════════════════════════════════════
 //  SERVICE WORKER
