@@ -17,17 +17,14 @@ const ALLOWED_ORIGIN = 'https://pod.dalek.coffee';
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'OPTIONS']);
 const MAX_BODY_BYTES = 1024 * 64; // 64 KB — Plex API POST bodies are tiny
 
-// Only these headers are forwarded to the Plex server.
-// Prevents leaking Cloudflare-injected headers (CF-Connecting-IP,
-// True-Client-IP, CF-Ray, etc.) to the upstream target.
-const FORWARDED_HEADERS = [
-  'accept',
-  'content-type',
-  'x-plex-token',
-  'x-plex-client-identifier',
-  'x-plex-product',
-  'x-plex-version',
-  'x-plex-platform',
+// Headers to STRIP before forwarding to Plex. This prevents leaking
+// Cloudflare-injected metadata while preserving all Plex headers the
+// server may need for token validation.
+const STRIPPED_HEADERS = [
+  'host', 'origin', 'x-proxy-url',
+  'cf-connecting-ip', 'cf-ipcountry', 'cf-ray', 'cf-visitor',
+  'cf-ew-via', 'cf-worker', 'true-client-ip',
+  'x-forwarded-for', 'x-forwarded-proto', 'x-real-ip',
 ];
 
 export default {
@@ -81,12 +78,12 @@ export default {
       return new Response('Target host not allowed', { status: 403 });
     }
 
-    // Build allow-listed headers only — never forward CF-Connecting-IP,
-    // True-Client-IP, CF-Ray, or other Cloudflare/browser metadata.
-    const proxyHeaders = new Headers();
-    for (const name of FORWARDED_HEADERS) {
-      const val = request.headers.get(name);
-      if (val) proxyHeaders.set(name, val);
+    // Forward all headers except Cloudflare metadata and proxy internals.
+    // Plex servers may require headers beyond the documented X-Plex-* set
+    // for token validation — stripping too aggressively causes 401s.
+    const proxyHeaders = new Headers(request.headers);
+    for (const name of STRIPPED_HEADERS) {
+      proxyHeaders.delete(name);
     }
 
     try {
@@ -118,7 +115,7 @@ function corsHeaders(request) {
   return {
     'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': FORWARDED_HEADERS.concat(['x-proxy-url']).join(', '),
+    'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') || '*',
     'Access-Control-Max-Age': '86400',
   };
 }
