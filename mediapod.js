@@ -1376,7 +1376,7 @@ function renderNowPlaying(screen) {
   if (!state.currentTrack) return;
   const t = state.currentTrack;
   const pct = state.duration > 0 ? (state.progress / state.duration) * 100 : 0;
-  const playIcon = state.playing ? '⏸' : '▶';
+  const playIcon = state.playing ? '⏸\uFE0E' : '▶';
 
   // ── Lightweight tick: only update progress if full structure already exists ──
   if (!screen && el.querySelector('.nowplaying-screen')) {
@@ -1562,6 +1562,8 @@ function commitScrub() {
 function onRimStart(e) {
   const rect = cwEl.getBoundingClientRect();
   if (!isOnRim(e, rect)) return;
+  // If the touch landed on a zone button, let it bubble through as a click
+  if (e.target && e.target.closest('.wheel-zone')) return;
   e.preventDefault();
   cancelMomentum();
   wheel.active    = true;
