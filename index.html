@@ -363,11 +363,11 @@ body.native .cf-artist-name { font-size: clamp(12px, 3vw, 16px); }
 .np-ctrl-btn { font-size: 14px; color: var(--ctrl-color); cursor: pointer; padding: 2px; opacity: 0.8; transition: color 0.3s, opacity 0.15s; -webkit-tap-highlight-color: transparent; }
 .np-ctrl-btn:hover { opacity: 1; }
 .np-ctrl-btn.play-pause { font-size: 18px; }
-.np-controls-2 { display: flex; align-items: center; justify-content: center; gap: 24px; padding: 2px 0; flex-shrink: 0; }
-.np-ctrl-sm { font-size: 13px !important; opacity: 0.55; }
+.np-ctrl-side { font-size: 13px !important; opacity: 0.5; }
 .np-active { opacity: 1 !important; color: #4a9eff !important; }
 .np-tappable { cursor: pointer; }
 .np-tappable span { border-bottom: 1px dotted currentColor; }
+.np-sleep-row { display: flex; justify-content: center; min-height: 14px; }
 .np-sleep-badge { font-size: 9px; color: var(--np-artist); opacity: 0.7; font-variant-numeric: tabular-nums; }
 
 /* ── Clickwheel ── */
@@ -589,8 +589,7 @@ body.native .np-times { font-size: clamp(10px, 2.4vw, 15px); }
 body.native .np-controls { gap: clamp(20px, 8vw, 52px); padding: clamp(4px,1.2vh,10px) 0; margin-bottom: auto; /* bottom auto centers block above dead space */ }
 body.native .np-ctrl-btn { font-size: clamp(18px, 5vw, 32px); }
 body.native .np-ctrl-btn.play-pause { font-size: clamp(26px, 7vw, 44px); }
-body.native .np-controls-2 { gap: clamp(28px, 9vw, 56px); }
-body.native .np-ctrl-sm { font-size: clamp(18px, 5vw, 30px) !important; }
+body.native .np-ctrl-side { font-size: clamp(18px, 5vw, 28px) !important; }
 body.native .np-sleep-badge { font-size: clamp(10px, 2.5vw, 14px); }
 
 /* Setup screen */

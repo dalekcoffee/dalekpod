@@ -1822,13 +1822,13 @@ function renderNowPlaying(screen) {
         </div>
       </div>
       <div class="np-controls">
+        <span class="np-ctrl-btn np-ctrl-side${state.shuffle ? ' np-active' : ''}" id="np-shuffle">⇄</span>
         <span class="np-ctrl-btn" id="np-prev">⏮</span>
         <span class="np-ctrl-btn play-pause" id="np-play">${playIcon}</span>
         <span class="np-ctrl-btn" id="np-next">⏭</span>
+        <span class="np-ctrl-btn np-ctrl-side${state.repeat !== 'off' ? ' np-active' : ''}" id="np-repeat">${state.repeat === 'one' ? '↺¹' : '↺'}</span>
       </div>
-      <div class="np-controls-2">
-        <span class="np-ctrl-btn np-ctrl-sm${state.shuffle ? ' np-active' : ''}" id="np-shuffle">⇄</span>
-        <span class="np-ctrl-btn np-ctrl-sm${state.repeat !== 'off' ? ' np-active' : ''}" id="np-repeat">${state.repeat === 'one' ? '↺¹' : '↺'}</span>
+      <div class="np-sleep-row">
         <span class="np-sleep-badge" id="np-sleep">${state.sleepEndsAt ? `💤 ${Math.max(1, Math.ceil((state.sleepEndsAt - Date.now()) / 60000))}m` : ''}</span>
       </div>
       <div id="scrub-indicator">◁◁ &nbsp; SCRUBBING &nbsp; ▷▷</div>
