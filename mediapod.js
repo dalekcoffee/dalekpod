@@ -1184,9 +1184,12 @@ function renderPlexServerPicker(servers, token) {
 }
 
 async function connectToPlexServer(server, token) {
-  // Try connections best-first: prefer local HTTPS → local HTTP → relay
+  // When served from a custom domain, direct *.plex.direct connections are
+  // blocked by CORS (Plex only allows app.plex.tv). Prefer relay connections
+  // first — they go through Plex's own infrastructure which allows any origin.
+  // Fall back to direct connections for local/self-hosted setups.
   const conns = [...server.connections].sort((a, b) => {
-    const score = c => (c.local ? 0 : 2) + (c.protocol === 'https' ? 0 : 1);
+    const score = c => (c.relay ? 0 : 2) + (c.local ? 0 : 1) + (c.protocol === 'https' ? 0 : 1);
     return score(a) - score(b);
   });
 
