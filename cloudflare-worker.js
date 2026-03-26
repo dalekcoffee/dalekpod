@@ -15,6 +15,20 @@
 
 const ALLOWED_ORIGIN = 'https://pod.dalek.coffee';
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'OPTIONS']);
+const MAX_BODY_BYTES = 1024 * 64; // 64 KB — Plex API POST bodies are tiny
+
+// Only these headers are forwarded to the Plex server.
+// Prevents leaking Cloudflare-injected headers (CF-Connecting-IP,
+// True-Client-IP, CF-Ray, etc.) to the upstream target.
+const FORWARDED_HEADERS = [
+  'accept',
+  'content-type',
+  'x-plex-token',
+  'x-plex-client-identifier',
+  'x-plex-product',
+  'x-plex-version',
+  'x-plex-platform',
+];
 
 export default {
   async fetch(request) {
@@ -35,6 +49,14 @@ export default {
     // Restrict HTTP methods to what Plex API actually needs
     if (!ALLOWED_METHODS.has(request.method)) {
       return new Response('Method not allowed', { status: 405 });
+    }
+
+    // Reject oversized request bodies (Plex API POSTs are tiny)
+    if (request.method === 'POST') {
+      const cl = request.headers.get('Content-Length');
+      if (cl && parseInt(cl, 10) > MAX_BODY_BYTES) {
+        return new Response('Payload too large', { status: 413 });
+      }
     }
 
     // The real Plex URL is passed in the X-Proxy-URL header
@@ -59,11 +81,13 @@ export default {
       return new Response('Target host not allowed', { status: 403 });
     }
 
-    // Forward the request to Plex, stripping proxy-specific headers
-    const proxyHeaders = new Headers(request.headers);
-    proxyHeaders.delete('X-Proxy-URL');
-    proxyHeaders.delete('Origin');
-    proxyHeaders.delete('Host');
+    // Build allow-listed headers only — never forward CF-Connecting-IP,
+    // True-Client-IP, CF-Ray, or other Cloudflare/browser metadata.
+    const proxyHeaders = new Headers();
+    for (const name of FORWARDED_HEADERS) {
+      const val = request.headers.get(name);
+      if (val) proxyHeaders.set(name, val);
+    }
 
     try {
       const res = await fetch(targetUrl, {
@@ -94,7 +118,7 @@ function corsHeaders(request) {
   return {
     'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') || 'Accept, X-Plex-Token, X-Proxy-URL, X-Plex-Client-Identifier, Content-Type',
+    'Access-Control-Allow-Headers': FORWARDED_HEADERS.concat(['x-proxy-url']).join(', '),
     'Access-Control-Max-Age': '86400',
   };
 }
