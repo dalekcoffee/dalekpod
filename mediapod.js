@@ -1452,9 +1452,11 @@ function renderNowPlaying(screen) {
   }
 
   // ── Full build (first render, track change, or explicit screen arg) ──
-  const thumb = getThumb(t, 160);
+  const thumb   = getThumb(t, 160);
+  const bgThumb = getThumb(t, 400); // larger for better blur quality
   el.innerHTML = `
-    <div class="nowplaying-screen">
+    <div class="nowplaying-screen${bgThumb ? ' has-blur' : ''}">
+      ${bgThumb ? `<div class="np-bg-blur" style="background-image:url('${esc(bgThumb)}')"></div>` : ''}
       <div class="np-titlebar"><div class="title">Now Playing</div></div>
       <div class="np-art">
         ${thumb ? `<img id="np-thumb" src="${esc(thumb)}" referrerpolicy="no-referrer" />` : '<div class="no-art">♪</div>'}

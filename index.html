@@ -223,7 +223,30 @@ body.fullscreen { background: #000; }
 .nowplaying-screen {
   width: 100%; height: 100%; display: flex; flex-direction: column;
   background: var(--nowplay-bg); transition: background 0.4s;
+  position: relative; overflow: hidden;
 }
+
+/* Blurred art background */
+.np-bg-blur {
+  position: absolute;
+  inset: -40px; /* overshoot to hide blur edge artifacts */
+  background-size: cover;
+  background-position: center;
+  filter: blur(28px);
+  opacity: 0.6;
+  z-index: 0;
+  pointer-events: none;
+}
+.nowplaying-screen.has-blur { background: rgba(0,0,0,0.52); }
+
+/* Lift content above blur layer */
+.np-titlebar, .np-art, .np-info, .np-progress-area, .np-controls {
+  position: relative; z-index: 1;
+}
+.nowplaying-screen.has-blur .np-song,
+.nowplaying-screen.has-blur .np-artist,
+.nowplaying-screen.has-blur .np-album { text-shadow: 0 1px 4px rgba(0,0,0,0.7); }
+#scrub-indicator { z-index: 2; }
 .np-titlebar {
   background: var(--tb-bg);
   padding: 3px 8px; min-height: 22px;
