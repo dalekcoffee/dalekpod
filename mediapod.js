@@ -1076,15 +1076,19 @@ function cfApplyTransforms() {
   if (!screen) return;
   const items = screen.querySelectorAll('.cf-item');
   if (!items.length) return;
+  const albums    = state.coverFlowAlbums;
   const targetIdx = state.coverFlowIndex;
   items.forEach((el, i) => {
     const slotOffset = i - 2; // slots: -2, -1, 0, 1, 2
+    const albumIdx   = targetIdx + slotOffset;
+    const hasAlbum   = albumIdx >= 0 && albumIdx < albums.length;
     const vp = slotOffset + (targetIdx - cfAnim.offset);
     const { tx, ry, sc, br, op, zi } = cfCalcTransform(vp);
-    el.style.transform = `translateX(${tx}%) rotateY(${ry}deg) scale(${sc})`;
-    el.style.filter    = `brightness(${br})`;
-    el.style.opacity   = op;
-    el.style.zIndex    = zi;
+    el.style.transform     = `translateX(${tx}%) rotateY(${ry}deg) scale(${sc})`;
+    el.style.filter        = `brightness(${br})`;
+    el.style.opacity       = hasAlbum ? op : 0;
+    el.style.zIndex        = zi;
+    el.style.pointerEvents = hasAlbum ? '' : 'none';
   });
 }
 
