@@ -10,13 +10,9 @@
 <meta name="theme-color" content="#111111">
 <meta name="referrer" content="no-referrer">
 <!-- connect-src cannot be narrowed: Plex server URLs are user-configured at runtime. Accepted risk for personal-use deployment. -->
-<!-- frame-ancestors cannot be set via <meta> — only works as an HTTP header, which GitHub Pages does not support. Clickjacking risk is accepted for personal-use deployment. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://plex.tv https://*.plex.tv https://*.plex.direct data: blob:; connect-src *; img-src * data: blob:; media-src * blob:; style-src 'self' 'unsafe-inline'; script-src 'self';">
 <title>MediaPod</title>
-<link rel="manifest" href="manifest.json">
-<link rel="icon" href="favicon.ico" sizes="any">
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-<link rel="apple-touch-icon" sizes="192x192" href="icon-192.png">
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22MediaPod%22%2C%22short_name%22%3A%22MediaPod%22%2C%22description%22%3A%22iPod-style%20Plex%20player%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23111111%22%2C%22theme_color%22%3A%22%23111111%22%2C%22orientation%22%3A%22portrait%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%2520viewBox%3D'0%25200%252096%252096'%253E%253Ccircle%2520cx%3D'48'%2520cy%3D'48'%2520r%3D'48'%2520fill%3D'%2523222'%2F%253E%253Ctext%2520x%3D'48'%2520y%3D'62'%2520font-size%3D'48'%2520text-anchor%3D'middle'%253E%25F0%259F%258E%25B5%253C%2Ftext%253E%253C%2Fsvg%253E%22%2C%22sizes%22%3A%22any%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -214,120 +210,20 @@ body.fullscreen { background: #000; }
 }
 .menu-item {
   padding: 0 8px; height: 22px;
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; justify-content: space-between;
   font-size: 12px; color: var(--item-color);
   border-bottom: 1px solid var(--item-border);
   cursor: pointer; font-weight: 500; transition: color 0.15s;
 }
-.menu-item.has-thumb { height: 28px; }
-.menu-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.menu-sub { font-size: 9px; opacity: 0.65; margin-left: 4px; }
-.menu-thumb {
-  width: 20px; height: 20px; border-radius: 2px;
-  object-fit: cover; flex-shrink: 0;
-  background: rgba(0,0,0,0.15);
-}
 .menu-item.selected { background: var(--sel-bg); color: var(--sel-color); }
-.menu-item .arrow { font-size: 10px; opacity: 0.6; flex-shrink: 0; }
+.menu-item .arrow { font-size: 10px; opacity: 0.6; }
 .menu-item.selected .arrow { opacity: 0.9; }
-
-/* ── Cover Flow ── */
-.coverflow-screen {
-  width: 100%; height: 100%; display: flex; flex-direction: column;
-  background: linear-gradient(180deg, #1a1a1e 0%, #000 55%);
-  overflow: hidden;
-}
-.cf-stage {
-  flex: 1; position: relative;
-  display: flex; align-items: center; justify-content: center;
-  overflow: hidden;
-  perspective: 700px; perspective-origin: 50% 45%;
-}
-.cf-item {
-  position: absolute;
-  width: var(--cf-size, 160px); height: var(--cf-size, 160px);
-  left: 50%; top: 50%;
-  margin-left: calc(var(--cf-size, 160px) / -2);
-  margin-top:  calc(var(--cf-size, 160px) / -2);
-  border-radius: 4px; overflow: hidden; cursor: pointer;
-  transition: transform 0.32s cubic-bezier(0.4,0,0.2,1),
-              filter 0.32s ease, opacity 0.32s ease;
-  will-change: transform, filter;
-}
-.cf-item img {
-  width: 100%; height: 100%; object-fit: cover; display: block;
-  user-select: none; -webkit-user-select: none;
-}
-.cf-active {
-  transform: translateX(0) rotateY(0deg) scale(1);
-  filter: brightness(1); z-index: 10;
-  box-shadow: 0 12px 48px rgba(0,0,0,0.85);
-}
-.cf-prev {
-  transform: translateX(-62%) rotateY(52deg) scale(0.82);
-  filter: brightness(0.5); z-index: 7;
-}
-.cf-next {
-  transform: translateX(62%) rotateY(-52deg) scale(0.82);
-  filter: brightness(0.5); z-index: 7;
-}
-.cf-far-prev {
-  transform: translateX(-108%) rotateY(64deg) scale(0.64);
-  filter: brightness(0.28); z-index: 4;
-}
-.cf-far-next {
-  transform: translateX(108%) rotateY(-64deg) scale(0.64);
-  filter: brightness(0.28); z-index: 4;
-}
-.cf-hidden { opacity: 0; pointer-events: none; }
-.cf-info {
-  padding: 10px 20px 6px; text-align: center; flex-shrink: 0;
-}
-.cf-album-title {
-  font-size: 13px; font-weight: 600; color: #fff;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.cf-artist-name {
-  font-size: 11px; color: rgba(255,255,255,0.55); margin-top: 1px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.cf-track-count { font-size: 10px; color: rgba(255,255,255,0.32); margin-top: 2px; }
-.cf-np-bar {
-  font-size: 9px; padding: 3px 8px; text-align: center;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  opacity: 0.55; color: #fff; flex-shrink: 0;
-}
-body.native .cf-album-title { font-size: clamp(14px, 3.5vw, 20px); }
-body.native .cf-artist-name { font-size: clamp(12px, 3vw, 16px); }
 
 /* ── Now Playing ── */
 .nowplaying-screen {
   width: 100%; height: 100%; display: flex; flex-direction: column;
   background: var(--nowplay-bg); transition: background 0.4s;
-  position: relative; overflow: hidden;
 }
-
-/* Blurred art background */
-.np-bg-blur {
-  position: absolute;
-  inset: -40px; /* overshoot to hide blur edge artifacts */
-  background-size: cover;
-  background-position: center;
-  filter: blur(28px);
-  opacity: 0.6;
-  z-index: 0;
-  pointer-events: none;
-}
-.nowplaying-screen.has-blur { background: rgba(0,0,0,0.52); }
-
-/* Lift content above blur layer */
-.np-titlebar, .np-art, .np-info, .np-progress-area, .np-controls {
-  position: relative; z-index: 1;
-}
-.nowplaying-screen.has-blur .np-song,
-.nowplaying-screen.has-blur .np-artist,
-.nowplaying-screen.has-blur .np-album { text-shadow: 0 1px 4px rgba(0,0,0,0.7); }
-#scrub-indicator { z-index: 2; }
 .np-titlebar {
   background: var(--tb-bg);
   padding: 3px 8px; min-height: 22px;
@@ -545,17 +441,80 @@ body.native .np-titlebar .title {
 
 /* Menu items — taller rows, bigger text */
 body.native .menu-item {
-  height: clamp(40px, 7vh, 58px);
-  font-size: clamp(16px, 4.2vw, 24px);
-  padding: 0 20px; gap: 10px;
+  height: clamp(28px, 6.5vh, 48px);
+  font-size: clamp(13px, 3.2vw, 20px);
+  padding: 0 16px;
 }
-body.native .menu-item.has-thumb { height: clamp(48px, 8vh, 64px); }
-body.native .menu-thumb {
-  width: clamp(34px, 5.5vh, 48px); height: clamp(34px, 5.5vh, 48px);
-  border-radius: 4px;
+body.native .menu-item .arrow { font-size: clamp(11px, 2.6vw, 17px); }
+
+/* ── CoverFlow ── */
+.coverflow-screen {
+  width: 100%; height: 100%; display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #1a1a1e 0%, #000 55%);
+  overflow: hidden;
 }
-body.native .menu-sub { font-size: clamp(10px, 2.4vw, 14px); }
-body.native .menu-item .arrow { font-size: clamp(13px, 3.2vw, 20px); }
+.cf-stage {
+  flex: 1; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  perspective: 700px; perspective-origin: 50% 45%;
+}
+.cf-item {
+  position: absolute;
+  width: var(--cf-size, 160px); height: var(--cf-size, 160px);
+  left: 50%; top: 50%;
+  margin-left: calc(var(--cf-size, 160px) / -2);
+  margin-top:  calc(var(--cf-size, 160px) / -2);
+  border-radius: 4px; overflow: hidden; cursor: pointer;
+  transition: transform 0.32s cubic-bezier(0.4,0,0.2,1),
+              filter 0.32s ease, opacity 0.32s ease;
+  will-change: transform, filter;
+}
+.cf-item img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  user-select: none; -webkit-user-select: none;
+}
+.cf-active {
+  transform: translateX(0) rotateY(0deg) scale(1);
+  filter: brightness(1); z-index: 10;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.85);
+}
+.cf-prev {
+  transform: translateX(-62%) rotateY(52deg) scale(0.82);
+  filter: brightness(0.5); z-index: 7;
+}
+.cf-next {
+  transform: translateX(62%) rotateY(-52deg) scale(0.82);
+  filter: brightness(0.5); z-index: 7;
+}
+.cf-far-prev {
+  transform: translateX(-108%) rotateY(64deg) scale(0.64);
+  filter: brightness(0.28); z-index: 4;
+}
+.cf-far-next {
+  transform: translateX(108%) rotateY(-64deg) scale(0.64);
+  filter: brightness(0.28); z-index: 4;
+}
+.cf-hidden { opacity: 0; pointer-events: none; }
+.cf-info {
+  padding: 10px 20px 6px; text-align: center; flex-shrink: 0;
+}
+.cf-album-title {
+  font-size: clamp(13px, 3.2vw, 17px); font-weight: 600;
+  color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cf-artist-name {
+  font-size: clamp(11px, 2.6vw, 14px); color: rgba(255,255,255,0.6);
+  margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cf-track-count {
+  font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 2px;
+}
+.cf-np-bar {
+  font-size: 10px; color: rgba(255,255,255,0.45);
+  padding: 4px 12px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* Now Playing art — generous square */
 body.native .np-art {
@@ -563,7 +522,7 @@ body.native .np-art {
   height: var(--native-art-size, 120px);
   max-width:  none;
   max-height: none;
-  margin: auto auto clamp(4px, 1vh, 12px); /* top auto centers block below titlebar */
+  margin: clamp(6px, 1.5vh, 18px) auto clamp(4px, 1vh, 12px);
 }
 
 body.native .np-info { padding: 0 20px; }
@@ -575,7 +534,7 @@ body.native .np-progress-area { padding: clamp(4px,1vh,10px) 20px clamp(2px,0.6v
 body.native .np-progress-bar  { height: 5px; border-radius: 3px; }
 body.native .np-times { font-size: clamp(10px, 2.4vw, 15px); }
 
-body.native .np-controls { gap: clamp(20px, 8vw, 52px); padding: clamp(4px,1.2vh,10px) 0; margin-bottom: auto; /* bottom auto centers block above dead space */ }
+body.native .np-controls { gap: clamp(20px, 8vw, 52px); padding: clamp(4px,1.2vh,10px) 0; }
 body.native .np-ctrl-btn { font-size: clamp(18px, 5vw, 32px); }
 body.native .np-ctrl-btn.play-pause { font-size: clamp(26px, 7vw, 44px); }
 

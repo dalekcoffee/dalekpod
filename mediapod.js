@@ -44,21 +44,17 @@ const PLEX_CLIENT_ID = 'mediapod-web-' + (_validClientId || (() => {
 //  STATE
 // ═══════════════════════════════════════════
 
-// Validate serverType from localStorage — only allow known values
-const _rawServerType = localStorage.getItem('serverType');
-const _serverType    = (_rawServerType === 'jellyfin') ? 'jellyfin' : 'plex';
+// serverType is always 'plex' (Jellyfin removed)
+const _serverType = 'plex';
 
 // Read darkMode once to avoid double getItem
 const _rawDarkMode = localStorage.getItem('darkMode');
 const _darkMode    = _rawDarkMode !== null ? _rawDarkMode === 'true' : true;
 
 // ── Validate stored URLs/tokens before trusting them ──
-const _storedPlexUrl    = localStorage.getItem('plexUrl')    || '';
-const _storedJfUrl      = localStorage.getItem('jellyfinUrl') || '';
-const _storedPlexToken  = localStorage.getItem('plexToken')  || '';
-const _storedJfApiKey   = localStorage.getItem('jellyfinApiKey') || '';
-const _storedJfUserId   = localStorage.getItem('jellyfinUserId') || '';
-const _storedLbToken    = localStorage.getItem('lbToken')        || '';
+const _storedPlexUrl    = localStorage.getItem('plexUrl')   || '';
+const _storedPlexToken  = localStorage.getItem('plexToken') || '';
+const _storedLbToken    = localStorage.getItem('lbToken')   || '';
 
 const _tokenRe = /^[a-zA-Z0-9_-]+$/;
 const _uuidRe  = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -69,10 +65,7 @@ const state = {
   plexToken:  _tokenRe.test(_storedPlexToken) ? _storedPlexToken : '',
   plexPinId:  null,
   plexPinPoll: null,
-  jellyfinUrl:    isValidUrl(_storedJfUrl) ? _storedJfUrl : '',
-  jellyfinApiKey: _tokenRe.test(_storedJfApiKey) ? _storedJfApiKey : '',
-  jellyfinUserId: _tokenRe.test(_storedJfUserId) ? _storedJfUserId : '',
-  lbToken:        _uuidRe.test(_storedLbToken) ? _storedLbToken : '',
+  lbToken:    _uuidRe.test(_storedLbToken) ? _storedLbToken : '',
   connected:   false,
   connStatus:  'disconnected', // 'connecting' | 'connected' | 'disconnected'
   coverFlowAlbums: [],
@@ -98,13 +91,13 @@ const state = {
 
 const DEFAULT_THEME = { uiHue: 0, podHue: 0, podSat: 0 };
 
-// Rate-limit: timestamp of last failed Jellyfin connection attempt
+// Rate-limit: timestamp of last failed Manual connection attempt
 let _lastConnectFailTs = 0;
 
 const UI_PRESETS = [
   { hue: 215, label: 'Classic',  color: 'hsl(215,65%,45%)' },
   { hue: 38,  label: 'Plex',     color: '#E5A00D' },
-  { hue: 280, label: 'Jellyfin', color: '#AA5CC3' },
+
   { hue: 168, label: 'Mint',     color: 'hsl(168,65%,38%)' },
   { hue: 0,   label: 'Ruby',     color: 'hsl(0,65%,45%)' },
   { hue: 28,  label: 'Amber',    color: 'hsl(28,80%,50%)' },
@@ -124,7 +117,7 @@ const POD_PRESETS = [
 //  THEME ENGINE
 // ═══════════════════════════════════════════
 
-/** Called by both plexFetch and jellyfinFetch on 401 */
+/** Called by plexFetch on 401 */
 function handleSessionExpiry() {
   state.connected = false; state.connStatus = 'disconnected';
   state.navStack = []; state.view = 'setup'; render();
@@ -259,34 +252,6 @@ const BRANDS = {
       placeholder: '#6a4a18',
       btnIdle:     'rgba(200,140,0,0.35)',
       shadow:      'rgba(180,120,0,0.3)',
-    },
-  },
-  jellyfin: {
-    light: {
-      bg:          'linear-gradient(180deg, #ddc8f0 0%, #c0a0dc 100%)',
-      title:       '#2a0a3a',
-      text:        '#4a1a5a',
-      accent:      '#AA5CC3',
-      accentDark:  '#7B2FBE',
-      border:      'rgba(130,50,180,0.4)',
-      inputBg:     'rgba(245,235,255,0.8)',
-      inputText:   '#2a0a3a',
-      placeholder: '#8a5aaa',
-      btnIdle:     'rgba(100,30,140,0.45)',
-      shadow:      'rgba(120,40,160,0.4)',
-    },
-    dark: {
-      bg:          'linear-gradient(180deg, #1e0a2e 0%, #130520 100%)',
-      title:       '#c07af0',
-      text:        '#7a3aaa',
-      accent:      '#AA5CC3',
-      accentDark:  '#7B2FBE',
-      border:      'rgba(160,80,200,0.3)',
-      inputBg:     'rgba(30,8,50,0.8)',
-      inputText:   '#c080e8',
-      placeholder: '#6a2a9a',
-      btnIdle:     'rgba(160,80,200,0.3)',
-      shadow:      'rgba(140,60,180,0.3)',
     },
   },
 };
@@ -631,43 +596,6 @@ function plexStream(key) {
 }
 
 // ═══════════════════════════════════════════
-//  JELLYFIN API
-// ═══════════════════════════════════════════
-async function jellyfinFetch(path) {
-  if (state.jellyfinApiKey.length > 512) { handleSessionExpiry(); throw new Error('Invalid session token.'); }
-  const res = await fetchWithTimeout(`${state.jellyfinUrl}${path}`, {
-    headers: {
-      Accept: 'application/json',
-      Authorization: `MediaBrowser Token="${state.jellyfinApiKey}"`,
-    }
-  });
-  if (res.status === 401) { handleSessionExpiry(); throw new Error('Session expired. Please sign in again.'); }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return safeJson(res);
-}
-
-function jellyfinThumb(itemId, size = 80) {
-  if (!itemId) return null;
-  // Token must be in URL — browser <img> cannot send custom headers
-  return `${state.jellyfinUrl}/Items/${itemId}/Images/Primary?width=${size}&height=${size}&api_key=${encodeURIComponent(state.jellyfinApiKey)}`;
-}
-
-function jellyfinStream(itemId) {
-  // Token must be in URL — <audio> cannot send custom headers
-  return `${state.jellyfinUrl}/Audio/${itemId}/universal?UserId=${encodeURIComponent(state.jellyfinUserId)}&api_key=${encodeURIComponent(state.jellyfinApiKey)}&Container=mp3,aac,ogg,opus,flac,wav`;
-}
-
-function normalizeJfTrack(item) {
-  return {
-    title:            item.Name         || 'Unknown',
-    grandparentTitle: item.AlbumArtist  || item.Artists?.[0] || '',
-    parentTitle:      item.Album        || '',
-    _thumbUrl:  jellyfinThumb(item.AlbumId || item.Id, 480),
-    _streamUrl: jellyfinStream(item.Id),
-  };
-}
-
-// ═══════════════════════════════════════════
 //  UNIFIED HELPERS
 // ═══════════════════════════════════════════
 function getThumb(track, size = 160) {
@@ -945,7 +873,6 @@ function buildMainMenu() {
 }
 
 async function openMusicMenu() {
-  if (state.serverType === 'jellyfin') return jfOpenMusicMenu();
   showLoading('Loading...');
   try {
     const data = await plexFetch('/library/sections');
@@ -988,10 +915,8 @@ function openSettings() {
           state.audio.pause();
           stopPlexPoll();
           state.plexUrl = ''; state.plexToken = '';
-          state.jellyfinUrl = ''; state.jellyfinApiKey = ''; state.jellyfinUserId = '';
           localStorage.removeItem('plexUrl'); localStorage.removeItem('plexToken');
-          localStorage.removeItem('jellyfinUrl'); localStorage.removeItem('jellyfinApiKey');
-          localStorage.removeItem('jellyfinUserId'); localStorage.removeItem('serverType');
+          localStorage.removeItem('serverType');
           state.connected = false; state.connStatus = 'disconnected';
           state.navStack = []; state.currentTrack = null;
           state.serverType = 'plex';
@@ -1008,12 +933,12 @@ function openSettings() {
 // ═══════════════════════════════════════════
 async function openArtistList(sectionKey, title) {
   await apiMenu('Loading artists...', () => plexFetch(`/library/sections/${sectionKey}/all?type=8`), d =>
-    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, thumb: thumbOrPlaceholder(a.thumb, 80), arrow: true, action: () => openArtistAlbums(a.ratingKey, a.title) })), title);
+    (d.MediaContainer.Metadata || []).map(a => ({ label: esc(a.title), thumb: thumbOrPlaceholder(a.thumb, 80), arrow: true, action: () => openArtistAlbums(a.ratingKey, a.title) })), title);
 }
 
 async function openArtistAlbums(key, name) {
   await apiMenu('Loading...', () => plexFetch(`/library/metadata/${key}/children`), d => {
-    const albums = (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, thumb: thumbOrPlaceholder(a.thumb, 80), arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) }));
+    const albums = (d.MediaContainer.Metadata || []).map(a => ({ label: esc(a.title), thumb: thumbOrPlaceholder(a.thumb, 80), arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) }));
     return [
       { label: '⇄ Shuffle Artist', arrow: false, action: async () => {
           showLoading('Loading tracks…');
@@ -1029,7 +954,7 @@ async function openArtistAlbums(key, name) {
 
 async function openAlbumList(sectionKey, title) {
   await apiMenu('Loading albums...', () => plexFetch(`/library/sections/${sectionKey}/all?type=9`), d =>
-    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, sublabel: a.parentTitle, thumb: thumbOrPlaceholder(a.thumb, 80), arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) })), title);
+    (d.MediaContainer.Metadata || []).map(a => ({ label: esc(a.title), sublabel: esc(a.parentTitle || ''), thumb: thumbOrPlaceholder(a.thumb, 80), arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) })), title);
 }
 
 async function openAlbumTracks(key, title) {
@@ -1037,7 +962,7 @@ async function openAlbumTracks(key, title) {
     const tracks = d.MediaContainer.Metadata || [];
     return [
       { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: thumbOrPlaceholder(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
+      ...tracks.map((t, i) => ({ label: esc(t.title), sublabel: esc(t.grandparentTitle || ''), thumb: thumbOrPlaceholder(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
     ];
   }, title);
 }
@@ -1047,14 +972,14 @@ async function openSongList(sectionKey, title) {
     const tracks = d.MediaContainer.Metadata || [];
     return [
       { label: '⇄ Shuffle All', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: thumbOrPlaceholder(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
+      ...tracks.map((t, i) => ({ label: esc(t.title), sublabel: esc(t.grandparentTitle || ''), thumb: thumbOrPlaceholder(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
     ];
   }, title);
 }
 
 async function openPlaylists() {
   await apiMenu('Loading playlists...', () => plexFetch('/playlists?playlistType=audio'), d =>
-    (d.MediaContainer.Metadata || []).map(p => ({ label: p.title, thumb: thumbOrPlaceholder(p.composite || p.thumb, 80), arrow: true, action: () => openPlaylistTracks(p.ratingKey, p.title) })), 'Playlists');
+    (d.MediaContainer.Metadata || []).map(p => ({ label: esc(p.title), thumb: thumbOrPlaceholder(p.composite || p.thumb, 80), arrow: true, action: () => openPlaylistTracks(p.ratingKey, p.title) })), 'Playlists');
 }
 
 async function openPlaylistTracks(key, title) {
@@ -1062,87 +987,7 @@ async function openPlaylistTracks(key, title) {
     const tracks = d.MediaContainer.Metadata || [];
     return [
       { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: thumbOrPlaceholder(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
-    ];
-  }, title);
-}
-
-// ═══════════════════════════════════════════
-//  MENUS — JELLYFIN
-// ═══════════════════════════════════════════
-function jfOpenMusicMenu() {
-  pushMenu('Music', [
-    { label: '⇄ Shuffle All', arrow: false, action: async () => {
-        showLoading('Loading tracks…');
-        try {
-          const d = await jellyfinFetch(`/Items?IncludeItemTypes=Audio&Recursive=true&SortBy=SortName&SortOrder=Ascending&Limit=500&UserId=${encodeURIComponent(state.jellyfinUserId)}`);
-          playShuffled((d.Items || []).map(normalizeJfTrack));
-        } catch(e) { showMenuError(e.message); }
-    }},
-    { label: 'Artists',   arrow: true, action: jfOpenArtistList },
-    { label: 'Albums',    arrow: true, action: jfOpenAlbumList },
-    { label: 'Songs',     arrow: true, action: jfOpenSongList },
-    { label: 'Playlists', arrow: true, action: jfOpenPlaylists },
-  ]);
-}
-
-async function jfOpenArtistList() {
-  await apiMenu('Loading artists...', () => jellyfinFetch(`/Items?IncludeItemTypes=MusicArtist&Recursive=true&SortBy=SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d =>
-    (d.Items || []).map(a => ({ label: a.Name, thumb: jellyfinThumb(a.Id, 80), arrow: true, action: () => jfOpenArtistAlbums(a.Id, a.Name) })), 'Artists');
-}
-
-async function jfOpenArtistAlbums(artistId, name) {
-  await apiMenu('Loading...', () => jellyfinFetch(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&ArtistIds=${encodeURIComponent(artistId)}&SortBy=ProductionYear,SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d => {
-    const albums = (d.Items || []).map(a => ({ label: a.Name, sublabel: a.ProductionYear ? String(a.ProductionYear) : '', thumb: jellyfinThumb(a.Id, 80), arrow: true, action: () => jfOpenAlbumTracks(a.Id, a.Name) }));
-    return [
-      { label: '⇄ Shuffle Artist', arrow: false, action: async () => {
-          showLoading('Loading tracks…');
-          try {
-            const td = await jellyfinFetch(`/Items?IncludeItemTypes=Audio&Recursive=true&ArtistIds=${encodeURIComponent(artistId)}&UserId=${encodeURIComponent(state.jellyfinUserId)}&SortBy=SortName`);
-            playShuffled((td.Items || []).map(normalizeJfTrack));
-          } catch(e) { showMenuError(e.message); }
-      }},
-      ...albums,
-    ];
-  }, name);
-}
-
-async function jfOpenAlbumList() {
-  await apiMenu('Loading albums...', () => jellyfinFetch(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&SortBy=SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d =>
-    (d.Items || []).map(a => ({ label: a.Name, sublabel: a.AlbumArtist || '', thumb: jellyfinThumb(a.Id, 80), arrow: true, action: () => jfOpenAlbumTracks(a.Id, a.Name) })), 'Albums');
-}
-
-async function jfOpenAlbumTracks(albumId, title) {
-  await apiMenu('Loading tracks...', () => jellyfinFetch(`/Items?ParentId=${encodeURIComponent(albumId)}&IncludeItemTypes=Audio&SortBy=IndexNumber,SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d => {
-    const tracks = (d.Items || []).map(normalizeJfTrack);
-    return [
-      { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: t._thumbUrl, arrow: false, action: () => playTrack(t, tracks, i) })),
-    ];
-  }, title);
-}
-
-async function jfOpenSongList() {
-  await apiMenu('Loading songs...', () => jellyfinFetch(`/Items?IncludeItemTypes=Audio&Recursive=true&SortBy=SortName&SortOrder=Ascending&Limit=500&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d => {
-    const tracks = (d.Items || []).map(normalizeJfTrack);
-    return [
-      { label: '⇄ Shuffle All', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: t._thumbUrl, arrow: false, action: () => playTrack(t, tracks, i) })),
-    ];
-  }, 'Songs');
-}
-
-async function jfOpenPlaylists() {
-  await apiMenu('Loading playlists...', () => jellyfinFetch(`/Items?IncludeItemTypes=Playlist&Recursive=true&SortBy=SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d =>
-    (d.Items || []).map(p => ({ label: p.Name, thumb: jellyfinThumb(p.Id, 80), arrow: true, action: () => jfOpenPlaylistTracks(p.Id, p.Name) })), 'Playlists');
-}
-
-async function jfOpenPlaylistTracks(playlistId, title) {
-  await apiMenu('Loading...', () => jellyfinFetch(`/Playlists/${encodeURIComponent(playlistId)}/Items?UserId=${encodeURIComponent(state.jellyfinUserId)}`), d => {
-    const tracks = (d.Items || []).map(normalizeJfTrack);
-    return [
-      { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: t._thumbUrl, arrow: false, action: () => playTrack(t, tracks, i) })),
+      ...tracks.map((t, i) => ({ label: esc(t.title), sublabel: esc(t.grandparentTitle || ''), thumb: thumbOrPlaceholder(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
     ];
   }, title);
 }
@@ -1174,7 +1019,7 @@ function cfNavigate(dir) {
   if (next === state.coverFlowIndex) { vibe(HAPTIC.boundary); return; }
   state.coverFlowIndex = next;
   vibe(HAPTIC.tick);
-  if (state.view === 'coverflow') render();
+  if (state.view === 'coverflow') cfUpdateDOM();
 }
 
 function cfOpenCurrentAlbum() {
@@ -1182,6 +1027,50 @@ function cfOpenCurrentAlbum() {
   if (!album) return;
   vibe(HAPTIC.select);
   openAlbumTracks(album.ratingKey, album.title);
+}
+
+function cfUpdateDOM() {
+  const screen = document.getElementById('screen');
+  const albums = state.coverFlowAlbums;
+  const idx    = state.coverFlowIndex;
+  const items  = screen ? screen.querySelectorAll('.cf-item') : [];
+  if (items.length !== 5) { render(); return; }  // safety fallback
+
+  const positions = [
+    { offset: -2, cls: 'cf-far-prev' },
+    { offset: -1, cls: 'cf-prev'     },
+    { offset:  0, cls: 'cf-active'   },
+    { offset:  1, cls: 'cf-next'     },
+    { offset:  2, cls: 'cf-far-next' },
+  ];
+  const ALL_CF = ['cf-far-prev','cf-prev','cf-active','cf-next','cf-far-next','cf-hidden'];
+  const albumThumb = a => a ? (plexThumb(a.thumb, 400) || PLACEHOLDER_THUMB) : PLACEHOLDER_THUMB;
+
+  items.forEach((el, i) => {
+    const { offset, cls } = positions[i];
+    const album  = albums[idx + offset];
+    const hidden = !album && offset !== 0;
+    el.classList.remove(...ALL_CF);
+    el.classList.add(cls);
+    if (hidden) el.classList.add('cf-hidden');
+    el.dataset.idx = idx + offset;
+    const img = el.querySelector('img');
+    if (img) img.src = albumThumb(album);
+  });
+
+  // Update counter
+  const connEl = screen.querySelector('.conn-status');
+  if (connEl) connEl.textContent = `${idx + 1} / ${albums.length}`;
+
+  // Update info — textContent is safe for raw API strings
+  const cur = albums[idx] || {};
+  const titleEl  = screen.querySelector('.cf-album-title');
+  const artistEl = screen.querySelector('.cf-artist-name');
+  const countEl  = screen.querySelector('.cf-track-count');
+  if (titleEl)  titleEl.textContent  = cur.title       || '';
+  if (artistEl) artistEl.textContent = cur.parentTitle || '';
+  if (countEl)  countEl.textContent  = cur.leafCount
+    ? `${cur.leafCount} track${cur.leafCount !== 1 ? 's' : ''}` : '';
 }
 
 function renderCoverFlow(screen) {
@@ -1225,7 +1114,7 @@ function renderCoverFlow(screen) {
       <div class="cf-info">
         <div class="cf-album-title">${esc(cur.title || '')}</div>
         <div class="cf-artist-name">${esc(cur.parentTitle || '')}</div>
-        ${cur.leafCount ? `<div class="cf-track-count">${cur.leafCount} track${cur.leafCount !== 1 ? 's' : ''}</div>` : ''}
+        <div class="cf-track-count">${cur.leafCount ? `${cur.leafCount} track${cur.leafCount !== 1 ? 's' : ''}` : ''}</div>
       </div>
       ${npBar}
     </div>`;
@@ -1250,7 +1139,8 @@ function renderCoverFlow(screen) {
       if (itemIdx === state.coverFlowIndex) { cfOpenCurrentAlbum(); return; }
       const clamped = Math.max(0, Math.min(albums.length - 1, itemIdx));
       state.coverFlowIndex = clamped;
-      render();
+      vibe(HAPTIC.tick);
+      cfUpdateDOM();
     });
   });
 }
@@ -1622,12 +1512,12 @@ function renderMenu(screen) {
   const rows = m.items.map((item, i) => {
     const sel = i === m.selectedIndex;
     const arrow = item.arrow ? '<span class="arrow">›</span>' : '';
-    const sub = item.sublabel ? `<span class="menu-sub">${esc(item.sublabel)}</span>` : '';
+    const sub = item.sublabel ? `<span class="menu-sub">${item.sublabel}</span>` : '';
     const thumbHtml = item.thumb
       ? `<img class="menu-thumb" src="${esc(item.thumb)}" referrerpolicy="no-referrer" loading="lazy" />`
       : '';
     return `<div class="menu-item ${sel ? 'selected' : ''}${item.thumb ? ' has-thumb' : ''}" data-idx="${i}">
-      ${thumbHtml}<span class="menu-text">${esc(item.label)}${sub}</span>${arrow}
+      ${thumbHtml}<span class="menu-text">${item.label}${sub}</span>${arrow}
     </div>`;
   }).join('');
 
@@ -2082,20 +1972,11 @@ applyDarkMode();      // sets dark-mode class + calls applySetupBranding
 initThemePanel();     // wires up hue rings, presets, reset
 autoScale();          // scale iPod to fill viewport immediately
 
-const hasPlex     = state.plexUrl && state.plexToken;
-const hasJellyfin = state.jellyfinUrl && state.jellyfinApiKey && state.jellyfinUserId;
+const hasPlex = state.plexUrl && state.plexToken;
 
-if (state.serverType === 'plex' && hasPlex) {
+if (hasPlex) {
   showLoading('Connecting...');
   plexFetch('/').then(() => {
-    state.connected = true; state.connStatus = 'connected';
-    state.navStack = [buildMainMenu()];
-    state.view = 'menu';
-    applyTheme(); render();
-  }).catch(() => { state.connStatus = 'disconnected'; state.view = 'setup'; render(); });
-} else if (state.serverType === 'jellyfin' && hasJellyfin) {
-  showLoading('Connecting...');
-  jellyfinFetch('/System/Info/Public').then(() => {
     state.connected = true; state.connStatus = 'connected';
     state.navStack = [buildMainMenu()];
     state.view = 'menu';
