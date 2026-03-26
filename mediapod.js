@@ -81,7 +81,8 @@ const state = {
   duration:    0,
   view:        'setup',
   darkMode:    _darkMode,
-  fullscreen:  false,
+  fullscreen:      false,
+  hapticStrength:  localStorage.getItem('hapticStrength') || 'medium',
   theme: {
     uiHue:  clampInt(localStorage.getItem('themeUiHue'),  0, 359, 0),
     podHue: clampInt(localStorage.getItem('themePodHue'), 0, 359, 0),
@@ -898,6 +899,21 @@ async function openMusicMenu() {
   } catch(e) { showMenuError(e.message); }
 }
 
+const HAPTIC_LEVELS = ['off', 'light', 'medium', 'strong'];
+function hapticLabel() {
+  const cap = s => s[0].toUpperCase() + s.slice(1);
+  return `📳 Haptics: ${cap(state.hapticStrength)}`;
+}
+function cycleHaptic() {
+  const idx = HAPTIC_LEVELS.indexOf(state.hapticStrength);
+  state.hapticStrength = HAPTIC_LEVELS[(idx + 1) % HAPTIC_LEVELS.length];
+  localStorage.setItem('hapticStrength', state.hapticStrength);
+  vibe(HAPTIC.tick); // preview the new level
+  const m = currentMenu();
+  const item = m?.items.find(i => i._id === 'haptic');
+  if (item) { item.label = hapticLabel(); render(); }
+}
+
 function openSettings() {
   state.navStack.push({
     title: 'Settings', selectedIndex: 0,
@@ -911,6 +927,7 @@ function openSettings() {
       { _id: 'lb', label: state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off', arrow: true, action: () => {
           state.view = 'lbsetup'; render();
       }},
+      { _id: 'haptic', label: hapticLabel(), arrow: false, action: cycleHaptic },
       { _id: 'fullscreen', label: state.fullscreen ? '✕ Exit Fullscreen' : '⛶ Fullscreen', arrow: false, action: () => {
           toggleFullscreen();
       }},
@@ -1730,9 +1747,16 @@ function renderNowPlaying(screen) {
 // ═══════════════════════════════════════════
 //  HAPTICS
 // ═══════════════════════════════════════════
-const vibe = (p) => { try { navigator.vibrate?.(p); } catch(_) {} };
+const HAPTIC_SCALE = { off: 0, light: 0.4, medium: 0.65, strong: 1.0 };
+function vibe(p) {
+  const mult = HAPTIC_SCALE[state.hapticStrength] ?? 0.65;
+  if (mult === 0) return;
+  const scale = v => Math.max(1, Math.round(v * mult));
+  const scaled = Array.isArray(p) ? p.map(scale) : scale(p);
+  try { navigator.vibrate?.(scaled); } catch(_) {}
+}
 const HAPTIC = {
-  tick:     20,           // menu step — single short pulse
+  tick:     20,           // menu step — single short pulse (reference = strong)
   select:   [20, 40, 20], // SELECT press
   back:     [15, 30, 15], // MENU / back
   boundary: [30, 40, 30], // hit list edge
