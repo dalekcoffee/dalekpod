@@ -412,7 +412,7 @@ function initThemePanel() {
   const satSlider = document.getElementById('pod-sat');
   satSlider.value = state.theme.podSat;
   satSlider.addEventListener('input', () => {
-    state.theme.podSat = parseInt(satSlider.value, 10);
+    state.theme.podSat = Math.max(0, Math.min(55, parseInt(satSlider.value, 10)));
     saveTheme(); applyTheme();
   });
 
@@ -1222,7 +1222,7 @@ async function startPlexOAuth() {
     state.plexPinId = pin.id;
 
     // Navigate the already-open window to the real auth URL
-    const authUrl = `https://app.plex.tv/auth#?clientID=${PLEX_CLIENT_ID}&code=${pin.code}&context[device][product]=MediaPod`;
+    const authUrl = `https://app.plex.tv/auth#?clientID=${encodeURIComponent(PLEX_CLIENT_ID)}&code=${encodeURIComponent(pin.code)}&context[device][product]=MediaPod`;
     if (authWin && !authWin.closed) {
       authWin.location.href = authUrl;
     } else {
