@@ -991,12 +991,12 @@ function openSettings() {
 // ═══════════════════════════════════════════
 async function openArtistList(sectionKey, title) {
   await apiMenu('Loading artists...', () => plexFetch(`/library/sections/${sectionKey}/all?type=8`), d =>
-    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, arrow: true, action: () => openArtistAlbums(a.ratingKey, a.title) })), title);
+    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, thumb: plexThumb(a.thumb, 80), arrow: true, action: () => openArtistAlbums(a.ratingKey, a.title) })), title);
 }
 
 async function openArtistAlbums(key, name) {
   await apiMenu('Loading...', () => plexFetch(`/library/metadata/${key}/children`), d => {
-    const albums = (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) }));
+    const albums = (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, thumb: plexThumb(a.thumb, 80), arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) }));
     return [
       { label: '⇄ Shuffle Artist', arrow: false, action: async () => {
           showLoading('Loading tracks…');
@@ -1012,7 +1012,7 @@ async function openArtistAlbums(key, name) {
 
 async function openAlbumList(sectionKey, title) {
   await apiMenu('Loading albums...', () => plexFetch(`/library/sections/${sectionKey}/all?type=9`), d =>
-    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, sublabel: a.parentTitle, arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) })), title);
+    (d.MediaContainer.Metadata || []).map(a => ({ label: a.title, sublabel: a.parentTitle, thumb: plexThumb(a.thumb, 80), arrow: true, action: () => openAlbumTracks(a.ratingKey, a.title) })), title);
 }
 
 async function openAlbumTracks(key, title) {
@@ -1020,7 +1020,7 @@ async function openAlbumTracks(key, title) {
     const tracks = d.MediaContainer.Metadata || [];
     return [
       { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }))
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: plexThumb(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
     ];
   }, title);
 }
@@ -1030,14 +1030,14 @@ async function openSongList(sectionKey, title) {
     const tracks = d.MediaContainer.Metadata || [];
     return [
       { label: '⇄ Shuffle All', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }))
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: plexThumb(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
     ];
   }, title);
 }
 
 async function openPlaylists() {
   await apiMenu('Loading playlists...', () => plexFetch('/playlists?playlistType=audio'), d =>
-    (d.MediaContainer.Metadata || []).map(p => ({ label: p.title, arrow: true, action: () => openPlaylistTracks(p.ratingKey, p.title) })), 'Playlists');
+    (d.MediaContainer.Metadata || []).map(p => ({ label: p.title, thumb: plexThumb(p.composite || p.thumb, 80), arrow: true, action: () => openPlaylistTracks(p.ratingKey, p.title) })), 'Playlists');
 }
 
 async function openPlaylistTracks(key, title) {
@@ -1045,7 +1045,7 @@ async function openPlaylistTracks(key, title) {
     const tracks = d.MediaContainer.Metadata || [];
     return [
       { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) }))
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: plexThumb(t.thumb || t.parentThumb || t.grandparentThumb, 80), arrow: false, action: () => playTrack(t, tracks, i) }))
     ];
   }, title);
 }
@@ -1071,12 +1071,12 @@ function jfOpenMusicMenu() {
 
 async function jfOpenArtistList() {
   await apiMenu('Loading artists...', () => jellyfinFetch(`/Items?IncludeItemTypes=MusicArtist&Recursive=true&SortBy=SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d =>
-    (d.Items || []).map(a => ({ label: a.Name, arrow: true, action: () => jfOpenArtistAlbums(a.Id, a.Name) })), 'Artists');
+    (d.Items || []).map(a => ({ label: a.Name, thumb: jellyfinThumb(a.Id, 80), arrow: true, action: () => jfOpenArtistAlbums(a.Id, a.Name) })), 'Artists');
 }
 
 async function jfOpenArtistAlbums(artistId, name) {
   await apiMenu('Loading...', () => jellyfinFetch(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&ArtistIds=${encodeURIComponent(artistId)}&SortBy=ProductionYear,SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d => {
-    const albums = (d.Items || []).map(a => ({ label: a.Name, sublabel: a.ProductionYear ? String(a.ProductionYear) : '', arrow: true, action: () => jfOpenAlbumTracks(a.Id, a.Name) }));
+    const albums = (d.Items || []).map(a => ({ label: a.Name, sublabel: a.ProductionYear ? String(a.ProductionYear) : '', thumb: jellyfinThumb(a.Id, 80), arrow: true, action: () => jfOpenAlbumTracks(a.Id, a.Name) }));
     return [
       { label: '⇄ Shuffle Artist', arrow: false, action: async () => {
           showLoading('Loading tracks…');
@@ -1092,7 +1092,7 @@ async function jfOpenArtistAlbums(artistId, name) {
 
 async function jfOpenAlbumList() {
   await apiMenu('Loading albums...', () => jellyfinFetch(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&SortBy=SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d =>
-    (d.Items || []).map(a => ({ label: a.Name, sublabel: a.AlbumArtist || '', arrow: true, action: () => jfOpenAlbumTracks(a.Id, a.Name) })), 'Albums');
+    (d.Items || []).map(a => ({ label: a.Name, sublabel: a.AlbumArtist || '', thumb: jellyfinThumb(a.Id, 80), arrow: true, action: () => jfOpenAlbumTracks(a.Id, a.Name) })), 'Albums');
 }
 
 async function jfOpenAlbumTracks(albumId, title) {
@@ -1100,7 +1100,7 @@ async function jfOpenAlbumTracks(albumId, title) {
     const tracks = (d.Items || []).map(normalizeJfTrack);
     return [
       { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) })),
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: t._thumbUrl, arrow: false, action: () => playTrack(t, tracks, i) })),
     ];
   }, title);
 }
@@ -1110,14 +1110,14 @@ async function jfOpenSongList() {
     const tracks = (d.Items || []).map(normalizeJfTrack);
     return [
       { label: '⇄ Shuffle All', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) })),
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: t._thumbUrl, arrow: false, action: () => playTrack(t, tracks, i) })),
     ];
   }, 'Songs');
 }
 
 async function jfOpenPlaylists() {
   await apiMenu('Loading playlists...', () => jellyfinFetch(`/Items?IncludeItemTypes=Playlist&Recursive=true&SortBy=SortName&SortOrder=Ascending&UserId=${encodeURIComponent(state.jellyfinUserId)}`), d =>
-    (d.Items || []).map(p => ({ label: p.Name, arrow: true, action: () => jfOpenPlaylistTracks(p.Id, p.Name) })), 'Playlists');
+    (d.Items || []).map(p => ({ label: p.Name, thumb: jellyfinThumb(p.Id, 80), arrow: true, action: () => jfOpenPlaylistTracks(p.Id, p.Name) })), 'Playlists');
 }
 
 async function jfOpenPlaylistTracks(playlistId, title) {
@@ -1125,7 +1125,7 @@ async function jfOpenPlaylistTracks(playlistId, title) {
     const tracks = (d.Items || []).map(normalizeJfTrack);
     return [
       { label: '⇄ Shuffle', arrow: false, action: () => playShuffled(tracks) },
-      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, arrow: false, action: () => playTrack(t, tracks, i) })),
+      ...tracks.map((t, i) => ({ label: t.title, sublabel: t.grandparentTitle, thumb: t._thumbUrl, arrow: false, action: () => playTrack(t, tracks, i) })),
     ];
   }, title);
 }
@@ -1497,9 +1497,12 @@ function renderMenu(screen) {
   const rows = m.items.map((item, i) => {
     const sel = i === m.selectedIndex;
     const arrow = item.arrow ? '<span class="arrow">›</span>' : '';
-    const sub = item.sublabel ? `<span style="font-size:9px;opacity:0.65;margin-left:4px">${esc(item.sublabel)}</span>` : '';
-    return `<div class="menu-item ${sel ? 'selected' : ''}" data-idx="${i}">
-      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(item.label)}${sub}</span>${arrow}
+    const sub = item.sublabel ? `<span class="menu-sub">${esc(item.sublabel)}</span>` : '';
+    const thumbHtml = item.thumb
+      ? `<img class="menu-thumb" src="${esc(item.thumb)}" referrerpolicy="no-referrer" loading="lazy" />`
+      : '';
+    return `<div class="menu-item ${sel ? 'selected' : ''}${item.thumb ? ' has-thumb' : ''}" data-idx="${i}">
+      ${thumbHtml}<span class="menu-text">${esc(item.label)}${sub}</span>${arrow}
     </div>`;
   }).join('');
 

@@ -213,13 +213,21 @@ body.fullscreen { background: #000; }
 }
 .menu-item {
   padding: 0 8px; height: 22px;
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--item-color);
   border-bottom: 1px solid var(--item-border);
   cursor: pointer; font-weight: 500; transition: color 0.15s;
 }
+.menu-item.has-thumb { height: 28px; }
+.menu-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.menu-sub { font-size: 9px; opacity: 0.65; margin-left: 4px; }
+.menu-thumb {
+  width: 20px; height: 20px; border-radius: 2px;
+  object-fit: cover; flex-shrink: 0;
+  background: rgba(0,0,0,0.15);
+}
 .menu-item.selected { background: var(--sel-bg); color: var(--sel-color); }
-.menu-item .arrow { font-size: 10px; opacity: 0.6; }
+.menu-item .arrow { font-size: 10px; opacity: 0.6; flex-shrink: 0; }
 .menu-item.selected .arrow { opacity: 0.9; }
 
 /* ── Now Playing ── */
@@ -469,8 +477,14 @@ body.native .np-titlebar .title {
 body.native .menu-item {
   height: clamp(40px, 7vh, 58px);
   font-size: clamp(16px, 4.2vw, 24px);
-  padding: 0 20px;
+  padding: 0 20px; gap: 10px;
 }
+body.native .menu-item.has-thumb { height: clamp(48px, 8vh, 64px); }
+body.native .menu-thumb {
+  width: clamp(34px, 5.5vh, 48px); height: clamp(34px, 5.5vh, 48px);
+  border-radius: 4px;
+}
+body.native .menu-sub { font-size: clamp(10px, 2.4vw, 14px); }
 body.native .menu-item .arrow { font-size: clamp(13px, 3.2vw, 20px); }
 
 /* Now Playing art — generous square */
