@@ -888,12 +888,12 @@ function toggleShuffle() {
 // ── Sleep timer ──────────────────────────────────────────────────────────────
 const SLEEP_OPTIONS = [0, 15, 30, 60, 90];
 function sleepLabel() {
-  return state.sleepMins ? `⏾ Sleep: ${state.sleepMins}m` : '⏾ Sleep Timer: Off';
+  return state.sleepMins ? `💤 Sleep: ${state.sleepMins}m` : '💤 Sleep Timer: Off';
 }
 function sleepStatusHtml() {
   if (!state.sleepEndsAt) return '';
   const mins = Math.max(1, Math.ceil((state.sleepEndsAt - Date.now()) / 60000));
-  return ` <span class="sleep-status-badge">⏾ ${mins}m</span>`;
+  return ` <span class="sleep-status-badge">💤 ${mins}m</span>`;
 }
 function cycleSleep() {
   if (state.sleepTimerId) { clearTimeout(state.sleepTimerId); state.sleepTimerId = null; }
@@ -1793,7 +1793,7 @@ function renderNowPlaying(screen) {
       `<span>${formatTime(state.progress)}</span><span>-${formatTime(state.duration - state.progress)}</span>`;
     if (play)  play.innerHTML   = playIcon;
     if (sleep) sleep.textContent = state.sleepEndsAt
-      ? `⏾ ${Math.max(1, Math.ceil((state.sleepEndsAt - Date.now()) / 60000))}m` : '';
+      ? `💤 ${Math.max(1, Math.ceil((state.sleepEndsAt - Date.now()) / 60000))}m` : '';
     return;
   }
 
@@ -1829,7 +1829,7 @@ function renderNowPlaying(screen) {
       <div class="np-controls-2">
         <span class="np-ctrl-btn np-ctrl-sm${state.shuffle ? ' np-active' : ''}" id="np-shuffle">⇄</span>
         <span class="np-ctrl-btn np-ctrl-sm${state.repeat !== 'off' ? ' np-active' : ''}" id="np-repeat">${state.repeat === 'one' ? '↺¹' : '↺'}</span>
-        <span class="np-sleep-badge" id="np-sleep">${state.sleepEndsAt ? `⏾ ${Math.max(1, Math.ceil((state.sleepEndsAt - Date.now()) / 60000))}m` : ''}</span>
+        <span class="np-sleep-badge" id="np-sleep">${state.sleepEndsAt ? `💤 ${Math.max(1, Math.ceil((state.sleepEndsAt - Date.now()) / 60000))}m` : ''}</span>
       </div>
       <div id="scrub-indicator">◁◁ &nbsp; SCRUBBING &nbsp; ▷▷</div>
     </div>`;
