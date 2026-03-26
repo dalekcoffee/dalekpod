@@ -7,8 +7,14 @@
 // 3. Edit Code → paste this file → Save and Deploy
 // 4. Go to Settings → Triggers → Custom Domains → add "plex-proxy.dalek.coffee"
 //    (or use the *.workers.dev URL and update PROXY_ORIGIN in mediapod.js)
+//
+// RATE LIMITING (optional but recommended):
+// The Origin header check stops browser-based abuse but not curl/scripts.
+// To add rate limiting: Workers & Pages → your worker → Settings →
+// scroll to "Rate Limiting" or use Cloudflare WAF rules on the custom domain.
 
 const ALLOWED_ORIGIN = 'https://pod.dalek.coffee';
+const ALLOWED_METHODS = new Set(['GET', 'POST', 'OPTIONS']);
 
 export default {
   async fetch(request) {
@@ -26,18 +32,30 @@ export default {
       });
     }
 
+    // Restrict HTTP methods to what Plex API actually needs
+    if (!ALLOWED_METHODS.has(request.method)) {
+      return new Response('Method not allowed', { status: 405 });
+    }
+
     // The real Plex URL is passed in the X-Proxy-URL header
     const targetUrl = request.headers.get('X-Proxy-URL');
     if (!targetUrl) {
       return new Response('Missing X-Proxy-URL header', { status: 400 });
     }
 
-    // Validate target is a Plex domain (prevent open relay abuse)
+    // Validate target is a Plex domain over HTTPS (prevent open relay / SSRF)
     let parsed;
     try { parsed = new URL(targetUrl); } catch { return new Response('Invalid URL', { status: 400 }); }
+
+    if (parsed.protocol !== 'https:') {
+      return new Response('HTTPS required', { status: 400 });
+    }
+
     const host = parsed.hostname.toLowerCase();
-    const allowedHosts = host.endsWith('.plex.direct') || host === 'plex.tv' || host.endsWith('.plex.tv');
-    if (!allowedHosts) {
+    const isAllowedHost = host.endsWith('.plex.direct')
+      || host === 'plex.tv'
+      || host.endsWith('.plex.tv');
+    if (!isAllowedHost) {
       return new Response('Target host not allowed', { status: 403 });
     }
 
@@ -51,23 +69,23 @@ export default {
       const res = await fetch(targetUrl, {
         method: request.method,
         headers: proxyHeaders,
-        body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+        body: request.method === 'POST' ? request.body : undefined,
       });
 
-      // Return response with CORS headers added
+      // Replace Plex's CORS header with ours
       const responseHeaders = new Headers(res.headers);
+      responseHeaders.delete('Access-Control-Allow-Origin');
       responseHeaders.set('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
       responseHeaders.set('Access-Control-Allow-Credentials', 'true');
-      responseHeaders.delete('Access-Control-Allow-Origin'); // remove Plex's header first
-      responseHeaders.set('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
 
       return new Response(res.body, {
         status: res.status,
         statusText: res.statusText,
         headers: responseHeaders,
       });
-    } catch (e) {
-      return new Response(`Proxy error: ${e.message}`, { status: 502 });
+    } catch (_) {
+      // Don't leak internal network details in error messages
+      return new Response('Bad gateway', { status: 502 });
     }
   },
 };
@@ -75,8 +93,8 @@ export default {
 function corsHeaders(request) {
   return {
     'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') || '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') || 'Accept, X-Plex-Token, X-Proxy-URL, X-Plex-Client-Identifier, Content-Type',
     'Access-Control-Max-Age': '86400',
   };
 }
