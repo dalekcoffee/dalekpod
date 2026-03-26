@@ -86,6 +86,7 @@ const state = {
   repeat:          localStorage.getItem('repeat')    || 'off', // 'off' | 'all' | 'one'
   shuffle:         localStorage.getItem('shuffle')   === 'true',
   crossfade:       clampInt(localStorage.getItem('crossfade'), 0, 10, 0), // seconds
+  clock24h:        localStorage.getItem('clock24h') === 'true',
   sleepTimerId:    null,
   sleepMins:       0,
   sleepEndsAt:     null,
@@ -1018,6 +1019,13 @@ function openSettings() {
           state.view = 'lbsetup'; render();
       }},
       { _id: 'haptic',     label: hapticLabel(),     arrow: false, action: cycleHaptic },
+      { _id: 'clock24h', label: state.clock24h ? '🕐 Clock: 24h' : '🕐 Clock: 12h', arrow: false, action: () => {
+          state.clock24h = !state.clock24h;
+          localStorage.setItem('clock24h', state.clock24h);
+          updateClock();
+          const m = currentMenu(); const item = m?.items.find(i => i._id === 'clock24h');
+          if (item) { item.label = state.clock24h ? '🕐 Clock: 24h' : '🕐 Clock: 12h'; render(); }
+      }},
       { _id: 'sleep',      label: sleepLabel(),      arrow: false, action: cycleSleep },
       { _id: 'crossfade',  label: crossfadeLabel(),  arrow: false, action: cycleCrossfade },
       { _id: 'fullscreen', label: state.fullscreen ? '✕ Exit Fullscreen' : '⛶ Fullscreen', arrow: false, action: () => {
@@ -2213,11 +2221,15 @@ if (hasPlex) {
 function updateClock() {
   const el = document.getElementById('clock');
   if (!el) return;
-  const d  = new Date();
-  const h  = ((d.getHours() % 12) || 12).toString();
-  const m  = d.getMinutes().toString().padStart(2, '0');
-  const ap = d.getHours() >= 12 ? 'PM' : 'AM';
-  el.textContent = `${h}:${m} ${ap}`;
+  const d = new Date();
+  const m = d.getMinutes().toString().padStart(2, '0');
+  if (state.clock24h) {
+    el.textContent = `${d.getHours().toString().padStart(2, '0')}:${m}`;
+  } else {
+    const h  = ((d.getHours() % 12) || 12).toString();
+    const ap = d.getHours() >= 12 ? 'PM' : 'AM';
+    el.textContent = `${h}:${m} ${ap}`;
+  }
 }
 setInterval(updateClock, 10000);
 updateClock();

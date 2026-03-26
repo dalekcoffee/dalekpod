@@ -386,6 +386,9 @@ body.native .cf-artist-name { font-size: clamp(12px, 3vw, 16px); }
   position: relative; cursor: pointer;
   touch-action: none;
   transition: background 0.4s, box-shadow 0.4s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none; -webkit-user-select: none;
+  outline: none;
 }
 .wheel-label {
   position: absolute; font-size: 8px; font-weight: 600;
@@ -405,7 +408,7 @@ body.native .cf-artist-name { font-size: clamp(12px, 3vw, 16px); }
   cursor: pointer; font-size: 10px; font-weight: 600; color: var(--center-color);
   transition: background 0.3s, color 0.3s, box-shadow 0.3s;
   touch-action: none; -webkit-tap-highlight-color: transparent;
-  user-select: none; -webkit-user-select: none;
+  user-select: none; -webkit-user-select: none; outline: none;
 }
 .wheel-center:active { filter: brightness(0.82); }
 .wheel-zone { position: absolute; cursor: pointer; touch-action: none; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
