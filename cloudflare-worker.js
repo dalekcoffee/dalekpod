@@ -13,6 +13,7 @@ const CORS_ALLOW_HEADERS = [
   'accept', 'content-type',
   'x-plex-token', 'x-plex-client-identifier',
   'x-plex-product', 'x-plex-version', 'x-plex-platform',
+  'x-plex-target-client-identifier',
   'x-proxy-url',
 ].join(', ');
 
@@ -44,13 +45,14 @@ export default {
       return new Response('Method not allowed', { status: 405 });
     }
 
-    // ── POST body size gate ──────────────────────────────────────────────────
-    // Require Content-Length on POST so we can enforce the limit without
-    // buffering the entire body (which would double memory usage).
-    if (request.method === 'POST') {
+    // ── POST/PUT body size gate ──────────────────────────────────────────────
+    // Require Content-Length on mutating requests so we can enforce the limit
+    // without buffering the entire body (which would double memory usage).
+    if (request.method === 'POST' || request.method === 'PUT') {
       const cl = request.headers.get('Content-Length');
       if (!cl) return new Response('Content-Length required', { status: 411 });
-      if (parseInt(cl, 10) > MAX_BODY_BYTES) {
+      const clInt = parseInt(cl, 10);
+      if (clInt < 0 || isNaN(clInt) || clInt > MAX_BODY_BYTES) {
         return new Response('Payload too large', { status: 413 });
       }
     }
@@ -102,8 +104,8 @@ export default {
       // Stream the response back; rewrite CORS headers so the browser accepts it
       const responseHeaders = new Headers(res.headers);
       responseHeaders.delete('Access-Control-Allow-Origin');
-      responseHeaders.set('Access-Control-Allow-Origin',      ALLOWED_ORIGIN);
-      responseHeaders.set('Access-Control-Allow-Credentials', 'true');
+      responseHeaders.delete('Access-Control-Allow-Credentials');
+      responseHeaders.set('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
 
       return new Response(res.body, {
         status:     res.status,

@@ -47,10 +47,15 @@ const PLEX_CLIENT_ID = 'mediapod-web-' + (_validClientId || (() => {
 // serverType is always 'plex' (Jellyfin removed)
 const _serverType = 'plex';
 
-// ── Theme mode (migrates from legacy darkMode boolean) ──
-const VALID_MODES = ['light','dark','eink','highcontrast','retro','terminal','cyberpunk','oled'];
+// ── Theme mode (migrates legacy values) ──
+const VALID_MODES = ['light','dark','eink-white','eink-black','highcontrast','coffee','terminal','cyberpunk','oled'];
 const _storedMode = localStorage.getItem('themeMode');
-const _themeMode = VALID_MODES.includes(_storedMode) ? _storedMode
+const _storedEinkInverted = localStorage.getItem('einkInverted') === 'true';
+// Migrate old mode names to new ones
+const _migratedMode = _storedMode === 'eink'  ? (_storedEinkInverted ? 'eink-black' : 'eink-white')
+                    : _storedMode === 'retro' ? 'coffee'
+                    : _storedMode;
+const _themeMode = VALID_MODES.includes(_migratedMode) ? _migratedMode
   : (localStorage.getItem('darkMode') === 'false' ? 'light' : 'dark');
 
 // ── Validate stored URLs/tokens before trusting them ──
@@ -85,8 +90,8 @@ const state = {
   themeMode:   _themeMode,
   einkInverted: localStorage.getItem('einkInverted') === 'true',
   fullscreen:      false,
-  hapticStrength:  localStorage.getItem('hapticStrength') || 'medium',
-  repeat:          localStorage.getItem('repeat')    || 'off', // 'off' | 'all' | 'one'
+  hapticStrength:  (['off','light','medium','strong'].includes(localStorage.getItem('hapticStrength')) ? localStorage.getItem('hapticStrength') : 'medium'),
+  repeat:          (['off','all','one'].includes(localStorage.getItem('repeat')) ? localStorage.getItem('repeat') : 'off'),
   shuffle:         localStorage.getItem('shuffle')   === 'true',
   crossfade:       clampInt(localStorage.getItem('crossfade'), 0, 10, 0), // seconds
   sleepTimerId:    null,
@@ -97,23 +102,26 @@ const state = {
     podHue: clampInt(localStorage.getItem('themePodHue'), 0, 359, 0),
     podSat: clampInt(localStorage.getItem('themePodSat'), 0, 55,  0),
   },
+  remoteSession:   null,  // active Plex session being controlled
+  remoteCommandId: 0,
+  remotePollTimer: null,
 };
 
 const DEFAULT_THEME = { uiHue: 0, podHue: 0, podSat: 0 };
 
 function isDark() {
   const m = state.themeMode;
-  if (m === 'light') return false;
-  if (m === 'eink') return state.einkInverted;
+  if (m === 'light' || m === 'eink-white') return false;
   return true;
 }
 
 const THEME_LABELS = {
-  light: '☀️ Light', dark: '🌙 Dark', eink: '📄 E-Ink',
-  highcontrast: '◐ High Contrast', retro: '📺 Retro',
+  light: '☀️ Light', dark: '🌙 Dark',
+  'eink-white': '◻ Pure White', 'eink-black': '◼ Pure Black',
+  highcontrast: '◐ High Contrast', coffee: '☕ Coffee',
   terminal: '💻 Terminal', cyberpunk: '🌆 Cyberpunk', oled: '⬛ OLED'
 };
-const THEME_DEFAULT_HUES = { retro: 38, terminal: 120, cyberpunk: 290 };
+const THEME_DEFAULT_HUES = { coffee: 38, terminal: 120, cyberpunk: 290 };
 
 // Rate-limit: timestamp of last failed Manual connection attempt
 let _lastConnectFailTs = 0;
@@ -206,7 +214,7 @@ function _accentCfg(h, mode) {
       cs:80,cl:65, sbl:0,
       ns:[10,100],na:[10,82],nx:[10,65],nt:[10,72],lt:[10,82]
     };
-    case 'retro': return {
+    case 'coffee': return {
       ts:40,tl:[18,10], ss:45,sl:[22,12], bs:20,bl:[8,5],
       ps:45,pl:[25,38], pt:`hsla(${h},30%,25%,0.3)`,
       is:50,il:60, ib:`hsla(${h},30%,40%,0.15)`, sc:`hsl(${h},60%,85%)`,
@@ -242,8 +250,8 @@ function applyTheme() {
   const ps2  = Math.round(ps * 0.55);
 
   // ── UI accent ──
-  if (mode === 'eink') {
-    const inv = state.einkInverted;
+  if (mode === 'eink-white' || mode === 'eink-black') {
+    const inv = mode === 'eink-black';
     const vars = inv
       ? { tb:['#444','#333'], sel:['#555','#444'], bg:['#111','#0a0a0a'], pf:['#888','#aaa'],
           pt:'rgba(255,255,255,0.15)', ic:'#ddd', ib:'rgba(255,255,255,0.12)', sc:'#fff',
@@ -269,8 +277,8 @@ function applyTheme() {
   }
 
   // ── iPod body ──
-  if (mode === 'eink') {
-    const inv = state.einkInverted;
+  if (mode === 'eink-white' || mode === 'eink-black') {
+    const inv = mode === 'eink-black';
     if (inv) {
       r.setProperty('--pod-bg',       'linear-gradient(170deg, #1a1a1a 0%, #0d0d0d 60%, #080808 100%)');
       r.setProperty('--pod-shadow',   '0 0 0 1px rgba(255,255,255,0.05) inset, 0 30px 80px rgba(0,0,0,0.95)');
@@ -343,7 +351,8 @@ function applyTheme() {
   // Keep PWA status bar colour in sync with active theme
   const tcMeta = document.querySelector('meta[name="theme-color"]');
   if (tcMeta) {
-    if (mode === 'eink') tcMeta.content = state.einkInverted ? '#0a0a0a' : '#e8e8e8';
+    if (mode === 'eink-black') tcMeta.content = '#0a0a0a';
+    else if (mode === 'eink-white') tcMeta.content = '#e8e8e8';
     else if (mode === 'oled') tcMeta.content = '#000';
     else tcMeta.content = dm ? `hsl(${h},52%,10%)` : `hsl(${h},48%,42%)`;
   }
@@ -412,7 +421,14 @@ function applyThemeMode() {
   const dm = isDark();
   document.body.classList.toggle('dark-mode', dm);
   document.body.classList.toggle('dark-page', dm);
-  VALID_MODES.forEach(m => document.body.classList.toggle('theme-' + m, m === state.themeMode));
+  // eink-white and eink-black both use the theme-eink CSS class
+  const einkActive = state.themeMode === 'eink-white' || state.themeMode === 'eink-black';
+  VALID_MODES.forEach(m => {
+    if (m !== 'eink-white' && m !== 'eink-black') {
+      document.body.classList.toggle('theme-' + m, m === state.themeMode);
+    }
+  });
+  document.body.classList.toggle('theme-eink', einkActive);
   applyTheme();
   applySetupBranding();
 }
@@ -491,142 +507,96 @@ window.addEventListener('resize', autoScale);
 window.visualViewport?.addEventListener('resize', autoScale);
 
 // ═══════════════════════════════════════════
-//  THEME PANEL — HUE RINGS
+//  THEME PANEL — HUE SLIDERS
 // ═══════════════════════════════════════════
-function ringAngleToHue(ringWrap, e) {
-  const rect = ringWrap.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top  + rect.height / 2;
-  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-  let angle = Math.atan2(clientY - cy, clientX - cx) + Math.PI / 2;
-  if (angle < 0) angle += Math.PI * 2;
-  return Math.round((angle / (Math.PI * 2)) * 360) % 360;
-}
-
-function positionDot(dotEl, hue, size = 76) {
-  const r = size * 0.315; // mid-ring radius
-  const angle = (hue / 360) * Math.PI * 2 - Math.PI / 2;
-  dotEl.style.left = (size / 2 + r * Math.cos(angle)) + 'px';
-  dotEl.style.top  = (size / 2 + r * Math.sin(angle)) + 'px';
-  dotEl.style.background = `hsl(${hue}, 100%, 50%)`;
-}
-
-function setupRing(ringId, dotId, onChange) {
-  const ring = document.getElementById(ringId);
-  const dot  = document.getElementById(dotId);
-  if (!ring || !dot) return;
-
-  let dragging = false;
-  const handle = e => {
-    const hue = ringAngleToHue(ring, e);
-    onChange(hue);
-    positionDot(dot, hue);
-  };
-  ring.addEventListener('mousedown', e => { dragging = true; handle(e); e.preventDefault(); });
-  document.addEventListener('mousemove', e => { if (dragging) handle(e); });
-  document.addEventListener('mouseup',   () => { dragging = false; });
-  ring.addEventListener('touchstart', e => { e.preventDefault(); handle(e); }, { passive: false });
-  ring.addEventListener('touchmove',  e => { e.preventDefault(); handle(e); }, { passive: false });
-}
-
 function initThemePanel() {
-  const uiDot  = document.getElementById('ui-dot');
-  const podDot = document.getElementById('pod-dot');
+  const uiHueSlider  = document.getElementById('ui-hue');
+  const podHueSlider = document.getElementById('pod-hue');
+  const satSlider    = document.getElementById('pod-sat');
 
-  setupRing('ui-ring', 'ui-dot', hue => {
-    state.theme.uiHue = hue;
+  uiHueSlider.value  = state.theme.uiHue;
+  podHueSlider.value = state.theme.podHue;
+  satSlider.value    = state.theme.podSat;
+
+  uiHueSlider.addEventListener('input', () => {
+    state.theme.uiHue = parseInt(uiHueSlider.value, 10);
     saveTheme(); applyTheme();
   });
-  setupRing('pod-ring', 'pod-dot', hue => {
-    state.theme.podHue = hue;
+  podHueSlider.addEventListener('input', () => {
+    state.theme.podHue = parseInt(podHueSlider.value, 10);
     saveTheme(); applyTheme();
   });
-
-  // Sat slider
-  const satSlider = document.getElementById('pod-sat');
-  satSlider.value = state.theme.podSat;
   satSlider.addEventListener('input', () => {
     state.theme.podSat = Math.max(0, Math.min(55, parseInt(satSlider.value, 10)));
     saveTheme(); applyTheme();
   });
 
-  // UI presets
-  const uiPresetsEl = document.getElementById('ui-presets');
-  UI_PRESETS.forEach(p => {
-    const chip = document.createElement('div');
-    chip.className = 'tp-chip';
-    chip.style.background = p.color;
-    chip.title = p.label;
-    chip.addEventListener('click', () => {
-      state.theme.uiHue = p.hue;
-      saveTheme(); applyTheme();
-      positionDot(uiDot, p.hue);
+  // Build preset chips (color dot + label)
+  function makeChips(presets, containerEl, onClick) {
+    presets.forEach(p => {
+      const chip = document.createElement('div');
+      chip.className = 'tp-chip';
+      chip.innerHTML = `<div class="tp-chip-dot" style="background:${p.color}"></div><span class="tp-chip-name">${esc(p.label)}</span>`;
+      chip.addEventListener('click', () => onClick(p));
+      containerEl.appendChild(chip);
     });
-    uiPresetsEl.appendChild(chip);
+  }
+
+  makeChips(UI_PRESETS, document.getElementById('ui-presets'), p => {
+    state.theme.uiHue = p.hue;
+    uiHueSlider.value = p.hue;
+    saveTheme(); applyTheme();
   });
 
-  // Pod presets
-  const podPresetsEl = document.getElementById('pod-presets');
-  POD_PRESETS.forEach(p => {
-    const chip = document.createElement('div');
-    chip.className = 'tp-chip';
-    chip.style.background = p.color;
-    chip.title = p.label;
-    chip.addEventListener('click', () => {
-      state.theme.podHue = p.hue;
-      state.theme.podSat = p.sat;
-      satSlider.value = p.sat;
-      saveTheme(); applyTheme();
-      positionDot(podDot, p.hue);
-    });
-    podPresetsEl.appendChild(chip);
+  makeChips(POD_PRESETS, document.getElementById('pod-presets'), p => {
+    state.theme.podHue = p.hue;
+    state.theme.podSat = p.sat;
+    podHueSlider.value = p.hue;
+    satSlider.value    = p.sat;
+    saveTheme(); applyTheme();
   });
 
-  // Reset
   document.getElementById('tp-reset').addEventListener('click', () => {
     state.theme = { ...DEFAULT_THEME };
-    satSlider.value = 0;
+    uiHueSlider.value  = state.theme.uiHue;
+    podHueSlider.value = state.theme.podHue;
+    satSlider.value    = state.theme.podSat;
     saveTheme(); applyTheme();
-    positionDot(uiDot,  state.theme.uiHue);
-    positionDot(podDot, state.theme.podHue);
   });
-
-  // Init dot positions
-  positionDot(uiDot,  state.theme.uiHue);
-  positionDot(podDot, state.theme.podHue);
 }
 
 function updateThemePanel() {
-  const uiSwatch  = document.getElementById('ui-swatch');
-  const podSwatch = document.getElementById('pod-swatch');
-  const satSlider = document.getElementById('pod-sat');
+  const uiSwatch     = document.getElementById('ui-swatch');
+  const podSwatch    = document.getElementById('pod-swatch');
+  const satSlider    = document.getElementById('pod-sat');
+  const uiHueSlider  = document.getElementById('ui-hue');
+  const podHueSlider = document.getElementById('pod-hue');
   if (!uiSwatch) return;
 
-  const h = state.theme.uiHue;
+  const h  = state.theme.uiHue;
   const ph = state.theme.podHue;
   const ps = state.theme.podSat;
 
+  if (uiHueSlider)  uiHueSlider.value  = h;
+  if (podHueSlider) podHueSlider.value = ph;
+  if (satSlider)    satSlider.value    = ps;
+
   uiSwatch.style.background = isDark()
-    ? `linear-gradient(135deg, hsl(${h},52%,20%), hsl(${h},52%,13%))`
-    : `linear-gradient(135deg, hsl(${h},48%,52%), hsl(${h},48%,40%))`;
+    ? `linear-gradient(90deg, hsl(${h},52%,15%), hsl(${h},60%,30%))`
+    : `linear-gradient(90deg, hsl(${h},48%,38%), hsl(${h},55%,58%))`;
 
   podSwatch.style.background = isDark()
-    ? `linear-gradient(135deg, hsl(${ph},${Math.round(ps*0.55)}%,18%), hsl(${ph},${Math.round(ps*0.55)}%,11%))`
-    : `linear-gradient(135deg, hsl(${ph},${ps}%,92%), hsl(${ph},${ps}%,78%))`;
+    ? `linear-gradient(90deg, hsl(${ph},${Math.round(ps*0.55)}%,9%), hsl(${ph},${Math.round(ps*0.55)}%,20%))`
+    : `linear-gradient(90deg, hsl(${ph},${ps}%,75%), hsl(${ph},${ps}%,93%))`;
 
-  if (satSlider) satSlider.value = ps;
-
-  // Update sat slider track gradient
   if (satSlider) {
     satSlider.style.background =
       `linear-gradient(90deg, hsl(${ph},0%,50%) 0%, hsl(${ph},60%,60%) 100%)`;
   }
 
-  // Highlight active presets
   const uiChips  = document.querySelectorAll('#ui-presets .tp-chip');
   const podChips = document.querySelectorAll('#pod-presets .tp-chip');
-  uiChips.forEach((c, i) => c.classList.toggle('selected', UI_PRESETS[i]?.hue === h));
+  uiChips.forEach((c, i)  => c.classList.toggle('selected', UI_PRESETS[i]?.hue === h));
   podChips.forEach((c, i) => c.classList.toggle('selected',
     POD_PRESETS[i]?.hue === ph && POD_PRESETS[i]?.sat === ps));
 }
@@ -636,8 +606,6 @@ function openThemePanel() {
   const backdrop = document.getElementById('tp-backdrop');
   panel.classList.remove('tp-hidden');
   backdrop.classList.remove('tp-hidden');
-  positionDot(document.getElementById('ui-dot'),  state.theme.uiHue);
-  positionDot(document.getElementById('pod-dot'), state.theme.podHue);
   updateThemePanel();
 }
 
@@ -705,6 +673,89 @@ async function plexFetch(path) {
   if (res.status === 401) { handleSessionExpiry(); throw new Error('Session expired. Please sign in again.'); }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return safeJson(res);
+}
+
+// ── Remote control — Plex player API ──
+
+async function fetchRemoteSessions() {
+  const data = await plexFetch('/status/sessions');
+  return (data?.MediaContainer?.Metadata || []).filter(s => s.Player);
+}
+
+async function plexCommand(action, params = {}) {
+  if (!state.remoteSession?.Player) throw new Error('No remote session');
+  const machineId = state.remoteSession.Player.machineIdentifier;
+  if (!machineId || !/^[a-zA-Z0-9_-]+$/.test(machineId)) throw new Error('Invalid client identifier');
+  state.remoteCommandId++;
+  const qs = new URLSearchParams({ commandID: state.remoteCommandId, type: 'music', ...params });
+  const url = `${state.plexUrl}/player/playback/${encodeURIComponent(action)}?${qs}&X-Plex-Client-Identifier=${encodeURIComponent(PLEX_CLIENT_ID)}`;
+  const res = await proxiedFetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'X-Plex-Token': state.plexToken,
+      'X-Plex-Target-Client-Identifier': machineId,
+    }
+  });
+  if (!res.ok) throw new Error(`Remote command failed: HTTP ${res.status}`);
+}
+
+async function refreshRemoteSession() {
+  if (!state.remoteSession?.Player) return;
+  const machineId = state.remoteSession.Player.machineIdentifier;
+  try {
+    const sessions = await fetchRemoteSessions();
+    const updated = sessions.find(s => s.Player?.machineIdentifier === machineId);
+    if (updated) {
+      state.remoteSession = updated;
+    } else {
+      clearRemotePoll();
+      state.remoteSession = null;
+      state.view = 'menu';
+      render();
+    }
+  } catch (_) {}
+}
+
+function clearRemotePoll() {
+  if (state.remotePollTimer) { clearInterval(state.remotePollTimer); state.remotePollTimer = null; }
+}
+
+function startRemotePoll() {
+  clearRemotePoll();
+  state.remotePollTimer = setInterval(async () => {
+    if (state.view !== 'remote') { clearRemotePoll(); return; }
+    await refreshRemoteSession();
+    if (state.view === 'remote') renderRemote();
+  }, 5000);
+}
+
+async function openRemote() {
+  showLoading('Fetching sessions…');
+  try {
+    const sessions = await fetchRemoteSessions();
+    if (!sessions.length) {
+      pushMenu('Remote', [{ label: 'No active sessions', arrow: false, action: () => {} }]);
+      return;
+    }
+    if (sessions.length === 1) {
+      state.remoteSession = sessions[0];
+      state.view = 'remote';
+      startRemotePoll();
+      render();
+      return;
+    }
+    pushMenu('Remote', sessions.map(s => ({
+      label:    esc(s.Player?.title || 'Unknown client'),
+      sublabel: `${s.grandparentTitle ? esc(s.grandparentTitle) + ' — ' : ''}${esc(s.title || '')}`,
+      arrow: true,
+      action: () => {
+        state.remoteSession = s;
+        state.view = 'remote';
+        startRemotePoll();
+        render();
+      }
+    })));
+  } catch(e) { showMenuError(e.message); }
 }
 
 // Generic placeholder for items without artwork — inline SVG, no external dep
@@ -1106,6 +1157,7 @@ function cycleCrossfade() {
 }
 
 function goBack() {
+  if (state.view === 'remote')     { clearRemotePoll(); state.remoteSession = null; state.view = 'menu'; render(); return; }
   if (state.view === 'nowplaying') { state.view = 'menu'; render(); return; }
   if (state.view === 'lbsetup')    { state.view = 'menu'; render(); return; }
   if (state.view === 'coverflow')  { if (cfAnim.raf) { cancelAnimationFrame(cfAnim.raf); cfAnim.raf = null; } state.returnToCoverFlow = false; state.view = 'menu'; render(); return; }
@@ -1153,6 +1205,7 @@ function buildMainMenu() {
       { label: 'Cover Flow',  arrow: true, action: openCoverFlow },
       { label: 'Music',       arrow: true, action: openMusicMenu },
       { label: 'Now Playing', arrow: true, action: () => { if (state.currentTrack) { state.view = 'nowplaying'; render(); } } },
+      { label: 'Remote',      arrow: true, action: openRemote },
       { label: 'Settings',   arrow: true, action: openSettings },
     ]
   };
@@ -1201,14 +1254,14 @@ function themeMenuLabel() {
 }
 
 function openThemeMenu() {
-  const items = VALID_MODES.map(m => ({
+  const modeItems = VALID_MODES.map(m => ({
     label: `${THEME_LABELS[m]}${m === state.themeMode ? ' ✓' : ''}`,
     arrow: false,
     action: () => {
       setThemeMode(m);
-      // Rebuild theme menu labels to move checkmark
+      // Rebuild mode item labels (offset by 1 — index 0 is Customize Colors)
       const menu = currentMenu();
-      if (menu) menu.items.forEach((it, i) => {
+      if (menu) menu.items.slice(1).forEach((it, i) => {
         it.label = `${THEME_LABELS[VALID_MODES[i]]}${VALID_MODES[i] === state.themeMode ? ' ✓' : ''}`;
       });
       // Update parent settings menu label
@@ -1218,24 +1271,10 @@ function openThemeMenu() {
       render();
     }
   }));
-  // For e-ink, add invert toggle
-  if (state.themeMode === 'eink') {
-    items.push({
-      label: state.einkInverted ? '◑ E-Ink: White on Black' : '◐ E-Ink: Black on White',
-      arrow: false,
-      action: () => {
-        state.einkInverted = !state.einkInverted;
-        localStorage.setItem('einkInverted', state.einkInverted);
-        applyThemeMode();
-        // Update the invert label
-        const menu = currentMenu();
-        const inv = menu?.items[menu.items.length - 1];
-        if (inv) inv.label = state.einkInverted ? '◑ E-Ink: White on Black' : '◐ E-Ink: Black on White';
-        render();
-      }
-    });
-  }
-  pushMenu('Theme', items);
+  pushMenu('Theme', [
+    { label: '🎨 Customize Colors', arrow: false, action: openThemePanel },
+    ...modeItems,
+  ]);
 }
 
 function openAbout() {
@@ -1256,16 +1295,6 @@ function openSettings() {
     title: 'Settings', selectedIndex: 0,
     items: [
       { _id: 'theme', label: themeMenuLabel(), arrow: true, action: openThemeMenu },
-      { label: '🎨 Customize Colors', arrow: false, action: () => {
-          if (state.themeMode === 'eink') {
-            // E-ink has no color customization — just toggle invert
-            state.einkInverted = !state.einkInverted;
-            localStorage.setItem('einkInverted', state.einkInverted);
-            applyThemeMode(); render();
-          } else {
-            openThemePanel();
-          }
-      }},
       { _id: 'lb', label: state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off', arrow: true, action: () => {
           state.view = 'lbsetup'; render();
       }},
@@ -1570,6 +1599,7 @@ function render() {
   const screen = document.getElementById('screen');
   if (state.view === 'setup')           renderSetup(screen);
   else if (state.view === 'nowplaying') renderNowPlaying(screen);
+  else if (state.view === 'remote')     renderRemote(screen);
   else if (state.view === 'coverflow')  renderCoverFlow(screen);
   else if (state.view === 'menu')       renderMenu(screen);
   else if (state.view === 'lbsetup')    renderLbSetup(screen);
@@ -2123,6 +2153,102 @@ function renderNowPlaying(screen) {
   });
 }
 
+function renderRemote(screen) {
+  const el = screen || document.getElementById('screen');
+  const s = state.remoteSession;
+  if (!s?.Player) { state.view = 'menu'; render(); return; }
+
+  const clientName = s.Player.title || 'Remote';
+  const isPlaying  = s.Player.state === 'playing';
+  const posMs      = s.viewOffset || 0;
+  const durMs      = s.duration   || 0;
+  const pct        = durMs > 0 ? (posMs / durMs) * 100 : 0;
+  const thumb      = plexThumb(s.thumb || s.parentThumb || s.grandparentThumb, 480);
+  const bgThumb    = plexThumb(s.thumb || s.parentThumb || s.grandparentThumb, 800);
+  const playIcon   = isPlaying
+    ? '<svg width="0.65em" height="0.8em" viewBox="0 0 7 9" style="display:inline-block;vertical-align:-0.05em"><rect x="0" y="0" width="2.5" height="9" rx="0.4" fill="currentColor"/><rect x="4.5" y="0" width="2.5" height="9" rx="0.4" fill="currentColor"/></svg>'
+    : '▶';
+
+  el.innerHTML = `
+    <div class="nowplaying-screen${bgThumb ? ' has-blur' : ''}">
+      ${bgThumb ? '<div class="np-bg-blur"></div>' : ''}
+      <div class="np-titlebar"><div class="title">📡 ${esc(clientName)}</div></div>
+      <div class="np-art">
+        ${thumb ? `<img id="rc-thumb" src="${esc(thumb)}" referrerpolicy="no-referrer" />` : '<div class="no-art">♪</div>'}
+      </div>
+      <div class="np-info">
+        <div class="np-song marquee"><span>${esc(s.title || 'Unknown')}</span></div>
+        <div class="np-artist marquee"><span>${esc(s.grandparentTitle || '')}</span></div>
+        <div class="np-album">${esc(s.parentTitle || '')}</div>
+      </div>
+      <div class="np-progress-area">
+        <div class="np-progress-bar" id="rc-bar">
+          <div class="np-progress-fill" style="width:${pct}%"></div>
+        </div>
+        <div class="np-times">
+          <span>${formatTime(posMs / 1000)}</span>
+          <span>-${formatTime(Math.max(0, (durMs - posMs) / 1000))}</span>
+        </div>
+      </div>
+      <div class="np-controls">
+        <span class="np-ctrl-btn np-ctrl-side" style="visibility:hidden">⇄</span>
+        <span class="np-ctrl-btn" id="rc-prev">⏮</span>
+        <span class="np-ctrl-btn play-pause" id="rc-play">${playIcon}</span>
+        <span class="np-ctrl-btn" id="rc-next">⏭</span>
+        <span class="np-ctrl-btn np-ctrl-side" style="visibility:hidden">↺</span>
+      </div>
+    </div>`;
+
+  if (bgThumb) {
+    const blurDiv = el.querySelector('.np-bg-blur');
+    if (blurDiv) blurDiv.style.backgroundImage = `url("${bgThumb.replace(/["\\]/g, '\\$&')}")`;
+  }
+
+  const thumbImg = el.querySelector('#rc-thumb');
+  if (thumbImg) thumbImg.addEventListener('error', () => {
+    const art = thumbImg.parentElement;
+    if (art) art.innerHTML = '<div class="no-art">♪</div>';
+  }, { once: true });
+
+  el.querySelector('#rc-play').addEventListener('click', async () => {
+    try {
+      await plexCommand(isPlaying ? 'pause' : 'play');
+      await refreshRemoteSession();
+      if (state.view === 'remote') renderRemote();
+    } catch(_) {}
+  });
+
+  el.querySelector('#rc-prev').addEventListener('click', async () => {
+    try {
+      await plexCommand('skipPrevious');
+      setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 600);
+    } catch(_) {}
+  });
+
+  el.querySelector('#rc-next').addEventListener('click', async () => {
+    try {
+      await plexCommand('skipNext');
+      setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 600);
+    } catch(_) {}
+  });
+
+  const bar = el.querySelector('#rc-bar');
+  if (bar && durMs > 0) bar.addEventListener('click', async e => {
+    const rect = bar.getBoundingClientRect();
+    const offsetMs = Math.round(((e.clientX - rect.left) / rect.width) * durMs);
+    try {
+      await plexCommand('seekTo', { offset: offsetMs });
+      setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 400);
+    } catch(_) {}
+  });
+
+  requestAnimationFrame(() => {
+    el.querySelectorAll('.marquee').forEach(m => {
+      if (m.scrollWidth > m.clientWidth + 4) m.classList.add('active');
+    });
+  });
+}
+
 // ═══════════════════════════════════════════
 //  HAPTICS
 // ═══════════════════════════════════════════
@@ -2437,7 +2563,7 @@ document.addEventListener('keydown', e => {
     case 'ArrowDown':  scrollMenu(1); break;
     case 'ArrowLeft':  if (state.view === 'nowplaying') prevTrack(); else if (state.view === 'coverflow') cfNavigate(-1); break;
     case 'ArrowRight': if (state.view === 'nowplaying') nextTrack(); else if (state.view === 'coverflow') cfNavigate(1);  break;
-    case 'Enter':      if (state.view === 'menu') selectItem(); else if (state.view === 'coverflow') cfOpenCurrentAlbum(); else if (state.view === 'nowplaying') togglePlay(); break;
+    case 'Enter':      if (state.view === 'menu') selectItem(); else if (state.view === 'coverflow') cfOpenCurrentAlbum(); else if (state.view === 'nowplaying') togglePlay(); else if (state.view === 'remote' && state.remoteSession?.Player) { const rs = state.remoteSession; plexCommand(rs.Player.state === 'playing' ? 'pause' : 'play').then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); }).catch(() => {}); } break;
     case 'Escape': case 'Backspace': goBack(); break;
     case ' ':          if (state.currentTrack) { e.preventDefault(); togglePlay(); } break;
     case 'f': case 'F': toggleFullscreen(); break;
