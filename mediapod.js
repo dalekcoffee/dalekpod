@@ -695,13 +695,14 @@ async function plexCommand(action, params = {}) {
   const qsObj = { commandID: state.remoteCommandId, ...params };
   if (mediaType) qsObj.type = mediaType;
   const qs = new URLSearchParams(qsObj);
-  const url = `${state.plexUrl}/player/playback/${action}?${qs}`;
+  // Server relay path: /system/players/{machineId}/playback/{action}
+  // (not /player/playback/ which is the direct-to-player LAN endpoint)
+  const url = `${state.plexUrl}/system/players/${encodeURIComponent(machineId)}/playback/${action}?${qs}`;
   const res = await proxiedFetch(url, {
     headers: {
       Accept: 'application/json',
       'X-Plex-Token': state.plexToken,
       'X-Plex-Client-Identifier': PLEX_CLIENT_ID,
-      'X-Plex-Target-Client-Identifier': machineId,
     }
   });
   if (!res.ok) throw new Error(`Remote command failed: HTTP ${res.status}`);
