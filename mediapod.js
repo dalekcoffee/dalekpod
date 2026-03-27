@@ -1397,7 +1397,9 @@ async function startPlexOAuth() {
     }, 8000);
     if (!pinRes.ok) throw new Error('Could not reach plex.tv');
     const pin = await safeJson(pinRes);
-    state.plexPinId = pin.id;
+    const pinId = parseInt(pin.id, 10);
+    if (!Number.isFinite(pinId) || pinId <= 0) throw new Error('Invalid PIN response from Plex.');
+    state.plexPinId = pinId;
 
     // Navigate the already-open window to the real auth URL
     const authUrl = `https://app.plex.tv/auth#?clientID=${encodeURIComponent(PLEX_CLIENT_ID)}&code=${encodeURIComponent(pin.code)}&context[device][product]=MediaPod`;
@@ -1416,7 +1418,7 @@ async function startPlexOAuth() {
       if (attempts > 150) { stopPlexPoll(); renderSetup(document.getElementById('screen')); return; }
       try {
         const checkRes = await fetchWithTimeout(
-          `https://plex.tv/api/v2/pins/${pin.id}`,
+          `https://plex.tv/api/v2/pins/${pinId}`,
           { headers: PLEX_HEADERS },
           6000
         );

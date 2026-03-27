@@ -1,7 +1,7 @@
 {
   "name": "MediaPod",
   "short_name": "MediaPod",
-  "description": "iPod-style Plex & Jellyfin player",
+  "description": "iPod-style Plex music player",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#111111",
