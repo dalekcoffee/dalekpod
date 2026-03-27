@@ -687,12 +687,20 @@ async function plexCommand(action, params = {}) {
   const machineId = state.remoteSession.Player.machineIdentifier;
   if (!machineId || !/^[a-zA-Z0-9_-]+$/.test(machineId)) throw new Error('Invalid client identifier');
   state.remoteCommandId++;
-  const qs = new URLSearchParams({ commandID: state.remoteCommandId, type: 'music', ...params });
-  const url = `${state.plexUrl}/player/playback/${encodeURIComponent(action)}?${qs}&X-Plex-Client-Identifier=${encodeURIComponent(PLEX_CLIENT_ID)}`;
+  // Derive media type from session so video sessions aren't sent type=music
+  const sessionType = state.remoteSession.type;
+  const mediaType = sessionType === 'track' ? 'music'
+                  : (sessionType === 'episode' || sessionType === 'movie' || sessionType === 'clip') ? 'video'
+                  : null;
+  const qsObj = { commandID: state.remoteCommandId, ...params };
+  if (mediaType) qsObj.type = mediaType;
+  const qs = new URLSearchParams(qsObj);
+  const url = `${state.plexUrl}/player/playback/${action}?${qs}`;
   const res = await proxiedFetch(url, {
     headers: {
       Accept: 'application/json',
       'X-Plex-Token': state.plexToken,
+      'X-Plex-Client-Identifier': PLEX_CLIENT_ID,
       'X-Plex-Target-Client-Identifier': machineId,
     }
   });
@@ -2153,6 +2161,19 @@ function renderNowPlaying(screen) {
   });
 }
 
+function showRemoteError(msg) {
+  const screen = document.getElementById('screen');
+  if (!screen) return;
+  screen.querySelectorAll('.rc-error-toast').forEach(e => e.remove());
+  const toast = document.createElement('div');
+  toast.className = 'rc-error-toast';
+  toast.style.cssText = 'position:absolute;bottom:44px;left:50%;transform:translateX(-50%);background:rgba(180,0,0,0.82);color:#fff;font-size:10px;padding:4px 10px;border-radius:8px;white-space:nowrap;pointer-events:none;z-index:10';
+  toast.textContent = '\u26a0 ' + msg;
+  screen.style.position = 'relative';
+  screen.appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
+}
+
 function renderRemote(screen) {
   const el = screen || document.getElementById('screen');
   const s = state.remoteSession;
@@ -2215,21 +2236,21 @@ function renderRemote(screen) {
       await plexCommand(isPlaying ? 'pause' : 'play');
       await refreshRemoteSession();
       if (state.view === 'remote') renderRemote();
-    } catch(_) {}
+    } catch(e) { showRemoteError(e.message); }
   });
 
   el.querySelector('#rc-prev').addEventListener('click', async () => {
     try {
       await plexCommand('skipPrevious');
       setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 600);
-    } catch(_) {}
+    } catch(e) { showRemoteError(e.message); }
   });
 
   el.querySelector('#rc-next').addEventListener('click', async () => {
     try {
       await plexCommand('skipNext');
       setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 600);
-    } catch(_) {}
+    } catch(e) { showRemoteError(e.message); }
   });
 
   const bar = el.querySelector('#rc-bar');
@@ -2239,7 +2260,7 @@ function renderRemote(screen) {
     try {
       await plexCommand('seekTo', { offset: offsetMs });
       setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 400);
-    } catch(_) {}
+    } catch(e) { showRemoteError(e.message); }
   });
 
   requestAnimationFrame(() => {
@@ -2563,7 +2584,7 @@ document.addEventListener('keydown', e => {
     case 'ArrowDown':  scrollMenu(1); break;
     case 'ArrowLeft':  if (state.view === 'nowplaying') prevTrack(); else if (state.view === 'coverflow') cfNavigate(-1); break;
     case 'ArrowRight': if (state.view === 'nowplaying') nextTrack(); else if (state.view === 'coverflow') cfNavigate(1);  break;
-    case 'Enter':      if (state.view === 'menu') selectItem(); else if (state.view === 'coverflow') cfOpenCurrentAlbum(); else if (state.view === 'nowplaying') togglePlay(); else if (state.view === 'remote' && state.remoteSession?.Player) { const rs = state.remoteSession; plexCommand(rs.Player.state === 'playing' ? 'pause' : 'play').then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); }).catch(() => {}); } break;
+    case 'Enter':      if (state.view === 'menu') selectItem(); else if (state.view === 'coverflow') cfOpenCurrentAlbum(); else if (state.view === 'nowplaying') togglePlay(); else if (state.view === 'remote' && state.remoteSession?.Player) { const rs = state.remoteSession; plexCommand(rs.Player.state === 'playing' ? 'pause' : 'play').then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); }).catch(e => showRemoteError(e.message)); } break;
     case 'Escape': case 'Backspace': goBack(); break;
     case ' ':          if (state.currentTrack) { e.preventDefault(); togglePlay(); } break;
     case 'f': case 'F': toggleFullscreen(); break;
