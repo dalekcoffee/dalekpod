@@ -25,7 +25,15 @@ body {
   transition: background 0.4s;
 }
 body.dark-page { background: #0a0a0a; }
+body.theme-oled { background: #000 !important; }
+body.theme-eink:not(.dark-page) { background: #ddd; }
+body.theme-eink.dark-page { background: #080808; }
+body.theme-highcontrast { background: #000 !important; }
 body.fullscreen { background: #000; }
+
+body.theme-eink .np-star { color: #999; }
+body.theme-eink .np-star.filled { color: #333; }
+body.theme-eink.dark-page .np-star.filled { color: #ddd; }
 
 /* ── Dynamic theme defaults (overridden by applyTheme()) ── */
 :root {
@@ -265,6 +273,9 @@ body.fullscreen { background: #000; }
 .np-active { opacity: 1 !important; color: #4a9eff !important; }
 .np-tappable { cursor: pointer; }
 .np-tappable span { border-bottom: 1px dotted currentColor; }
+.np-stars { display: flex; justify-content: center; gap: 6px; padding: 2px 0 0; position: relative; z-index: 1; }
+.np-star { font-size: 14px; color: var(--np-times); opacity: 0.3; cursor: pointer; transition: color 0.2s, opacity 0.2s; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; padding: 2px 1px; }
+.np-star.filled { color: #f0c040; opacity: 1; }
 .np-sleep-row { display: flex; justify-content: center; min-height: 14px; }
 .np-sleep-badge { font-size: 9px; color: var(--np-artist); opacity: 0.7; font-variant-numeric: tabular-nums; }
 
@@ -550,6 +561,8 @@ body.native .np-ctrl-btn { font-size: clamp(18px, 5vw, 32px); }
 body.native .np-ctrl-btn.play-pause { font-size: clamp(26px, 7vw, 44px); }
 body.native .np-ctrl-side { font-size: clamp(18px, 5vw, 28px) !important; }
 body.native .np-sleep-badge { font-size: clamp(10px, 2.5vw, 14px); }
+body.native .np-stars { gap: clamp(8px, 3vw, 16px); padding: clamp(2px, 0.8vh, 6px) 0; }
+body.native .np-star { font-size: clamp(18px, 5vw, 28px); padding: 4px 2px; }
 
 /* Setup screen */
 body.native .setup-screen { gap: 10px; padding: 20px 24px; }

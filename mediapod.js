@@ -47,9 +47,11 @@ const PLEX_CLIENT_ID = 'mediapod-web-' + (_validClientId || (() => {
 // serverType is always 'plex' (Jellyfin removed)
 const _serverType = 'plex';
 
-// Read darkMode once to avoid double getItem
-const _rawDarkMode = localStorage.getItem('darkMode');
-const _darkMode    = _rawDarkMode !== null ? _rawDarkMode === 'true' : true;
+// ── Theme mode (migrates from legacy darkMode boolean) ──
+const VALID_MODES = ['light','dark','eink','highcontrast','retro','terminal','cyberpunk','oled'];
+const _storedMode = localStorage.getItem('themeMode');
+const _themeMode = VALID_MODES.includes(_storedMode) ? _storedMode
+  : (localStorage.getItem('darkMode') === 'false' ? 'light' : 'dark');
 
 // ── Validate stored URLs/tokens before trusting them ──
 const _storedPlexUrl    = localStorage.getItem('plexUrl')   || '';
@@ -80,7 +82,8 @@ const state = {
   progress:    0,
   duration:    0,
   view:        'setup',
-  darkMode:    _darkMode,
+  themeMode:   _themeMode,
+  einkInverted: localStorage.getItem('einkInverted') === 'true',
   fullscreen:      false,
   hapticStrength:  localStorage.getItem('hapticStrength') || 'medium',
   repeat:          localStorage.getItem('repeat')    || 'off', // 'off' | 'all' | 'one'
@@ -97,6 +100,20 @@ const state = {
 };
 
 const DEFAULT_THEME = { uiHue: 0, podHue: 0, podSat: 0 };
+
+function isDark() {
+  const m = state.themeMode;
+  if (m === 'light') return false;
+  if (m === 'eink') return state.einkInverted;
+  return true;
+}
+
+const THEME_LABELS = {
+  light: '☀️ Light', dark: '🌙 Dark', eink: '📄 E-Ink',
+  highcontrast: '◐ High Contrast', retro: '📺 Retro',
+  terminal: '💻 Terminal', cyberpunk: '🌆 Cyberpunk', oled: '⬛ OLED'
+};
+const THEME_DEFAULT_HUES = { retro: 38, terminal: 120, cyberpunk: 290 };
 
 // Rate-limit: timestamp of last failed Manual connection attempt
 let _lastConnectFailTs = 0;
@@ -133,57 +150,159 @@ function handleSessionExpiry() {
   state.navStack = []; state.view = 'setup'; render();
 }
 
-function applyTheme() {
-  const r  = document.documentElement.style;
-  const h  = state.theme.uiHue;
-  const dm = state.darkMode;
-  const ph = state.theme.podHue;
-  const ps = state.theme.podSat;
-  const ps2 = Math.round(ps * 0.55);
+// ── Parameterized accent theme helper ──
+function _tGrad(h, s, l1, l2) { return `linear-gradient(180deg, hsl(${h},${s}%,${l1}%) 0%, hsl(${h},${s}%,${l2}%) 100%)`; }
 
-  // — UI accent —
-  if (dm) {
-    const screenBg  = `linear-gradient(180deg, hsl(${h},28%,10%) 0%, hsl(${h},28%,7%) 100%)`;
-    r.setProperty('--tb-bg',       `linear-gradient(180deg, hsl(${h},52%,20%) 0%, hsl(${h},52%,13%) 100%)`);
-    r.setProperty('--sel-bg',      `linear-gradient(180deg, hsl(${h},55%,21%) 0%, hsl(${h},55%,12%) 100%)`);
-    r.setProperty('--list-bg',     screenBg);
-    r.setProperty('--nowplay-bg',  screenBg);   // always same as list-bg
-    r.setProperty('--prog-fill',   `linear-gradient(90deg, hsl(${h},55%,28%), hsl(${h},55%,40%))`);
-    r.setProperty('--prog-track',  `hsla(${h},50%,30%,0.25)`);
-    r.setProperty('--item-color',  `hsl(${h},60%,68%)`);
-    r.setProperty('--item-border', `hsla(${h},50%,50%,0.15)`);
-    r.setProperty('--sel-color',   `hsl(${h},70%,88%)`);
-    r.setProperty('--ctrl-color',  `hsl(${h},55%,52%)`);
-    r.setProperty('--spin-color',  `hsl(${h},55%,52%)`);
-    r.setProperty('--screen-bg',   `hsl(${h},28%,8%)`);
-    r.setProperty('--np-song',     `hsl(${h},65%,75%)`);
-    r.setProperty('--np-artist',   `hsl(${h},45%,52%)`);
-    r.setProperty('--np-album',    `hsl(${h},35%,38%)`);
-    r.setProperty('--np-times',    `hsl(${h},35%,42%)`);
-    r.setProperty('--load-text',   `hsl(${h},40%,50%)`);
+function _setAccent(r, h, c) {
+  const bh = c.bh ?? h;
+  const screenBg = _tGrad(bh, c.bs, c.bl[0], c.bl[1]);
+  r.setProperty('--tb-bg',       _tGrad(h, c.ts, c.tl[0], c.tl[1]));
+  r.setProperty('--sel-bg',      _tGrad(h, c.ss, c.sl[0], c.sl[1]));
+  r.setProperty('--list-bg',     screenBg);
+  r.setProperty('--nowplay-bg',  screenBg);
+  r.setProperty('--prog-fill',   `linear-gradient(90deg, hsl(${h},${c.ps}%,${c.pl[0]}%), hsl(${h},${c.ps}%,${c.pl[1]}%))`);
+  r.setProperty('--prog-track',  c.pt);
+  r.setProperty('--item-color',  `hsl(${h},${c.is}%,${c.il}%)`);
+  r.setProperty('--item-border', c.ib);
+  r.setProperty('--sel-color',   c.sc);
+  r.setProperty('--ctrl-color',  `hsl(${h},${c.cs}%,${c.cl}%)`);
+  r.setProperty('--spin-color',  `hsl(${h},${c.cs}%,${c.cl}%)`);
+  r.setProperty('--screen-bg',   `hsl(${bh},${c.bs}%,${c.sbl}%)`);
+  r.setProperty('--np-song',     `hsl(${h},${c.ns[0]}%,${c.ns[1]}%)`);
+  r.setProperty('--np-artist',   `hsl(${h},${c.na[0]}%,${c.na[1]}%)`);
+  r.setProperty('--np-album',    `hsl(${h},${c.nx[0]}%,${c.nx[1]}%)`);
+  r.setProperty('--np-times',    `hsl(${h},${c.nt[0]}%,${c.nt[1]}%)`);
+  r.setProperty('--load-text',   `hsl(${h},${c.lt[0]}%,${c.lt[1]}%)`);
+}
+
+// Accent config per mode — compact notation: ts=titlebar sat, tl=titlebar lightness [top,bottom], etc.
+function _accentCfg(h, mode) {
+  switch (mode) {
+    case 'light': return {
+      ts:48,tl:[52,40], ss:52,sl:[42,28], bs:28,bl:[78,68],
+      ps:52,pl:[36,52], pt:'rgba(0,0,0,0.18)',
+      is:45,il:16, ib:'rgba(255,255,255,0.42)', sc:'white',
+      cs:45,cl:18, sbl:66,
+      ns:[45,14],na:[40,26],nx:[35,38],nt:[38,28],lt:[42,20]
+    };
+    case 'dark': return {
+      ts:52,tl:[20,13], ss:55,sl:[21,12], bs:28,bl:[10,7],
+      ps:55,pl:[28,40], pt:`hsla(${h},50%,30%,0.25)`,
+      is:60,il:68, ib:`hsla(${h},50%,50%,0.15)`, sc:`hsl(${h},70%,88%)`,
+      cs:55,cl:52, sbl:8,
+      ns:[65,75],na:[45,52],nx:[35,38],nt:[35,42],lt:[40,50]
+    };
+    case 'oled': return {
+      ts:55,tl:[10,4], ss:60,sl:[14,6], bs:0,bl:[0,0],
+      ps:55,pl:[30,45], pt:'rgba(255,255,255,0.1)',
+      is:55,il:72, ib:'rgba(255,255,255,0.08)', sc:`hsl(${h},70%,90%)`,
+      cs:55,cl:55, sbl:0,
+      ns:[60,78],na:[45,55],nx:[35,40],nt:[35,45],lt:[40,52]
+    };
+    case 'highcontrast': return {
+      ts:80,tl:[42,28], ss:90,sl:[38,22], bs:0,bl:[2,0],
+      ps:80,pl:[45,62], pt:'rgba(255,255,255,0.25)',
+      is:10,il:95, ib:'rgba(255,255,255,0.5)', sc:'#fff',
+      cs:80,cl:65, sbl:0,
+      ns:[10,100],na:[10,82],nx:[10,65],nt:[10,72],lt:[10,82]
+    };
+    case 'retro': return {
+      ts:40,tl:[18,10], ss:45,sl:[22,12], bs:20,bl:[8,5],
+      ps:45,pl:[25,38], pt:`hsla(${h},30%,25%,0.3)`,
+      is:50,il:60, ib:`hsla(${h},30%,40%,0.15)`, sc:`hsl(${h},60%,85%)`,
+      cs:45,cl:50, sbl:6,
+      ns:[55,70],na:[40,48],nx:[30,35],nt:[30,40],lt:[35,45]
+    };
+    case 'terminal': return {
+      ts:60,tl:[15,8], ss:70,sl:[20,10], bs:10,bl:[2,0],
+      ps:65,pl:[30,45], pt:`hsla(${h},40%,20%,0.3)`,
+      is:70,il:55, ib:`hsla(${h},50%,30%,0.2)`, sc:`hsl(${h},80%,85%)`,
+      cs:65,cl:50, sbl:1,
+      ns:[70,65],na:[55,45],nx:[45,35],nt:[50,40],lt:[55,45]
+    };
+    case 'cyberpunk': return {
+      bh:(h+180)%360,
+      ts:70,tl:[20,12], ss:80,sl:[28,16], bs:15,bl:[5,3],
+      ps:80,pl:[35,52], pt:`hsla(${h},50%,25%,0.3)`,
+      is:80,il:70, ib:`hsla(${h},60%,40%,0.2)`, sc:`hsl(${h},90%,90%)`,
+      cs:85,cl:60, sbl:4,
+      ns:[85,75],na:[60,50],nx:[50,40],nt:[55,45],lt:[60,50]
+    };
+    default: return _accentCfg(h, 'dark');
+  }
+}
+
+function applyTheme() {
+  const r    = document.documentElement.style;
+  const h    = state.theme.uiHue;
+  const mode = state.themeMode;
+  const dm   = isDark();
+  const ph   = state.theme.podHue;
+  const ps   = state.theme.podSat;
+  const ps2  = Math.round(ps * 0.55);
+
+  // ── UI accent ──
+  if (mode === 'eink') {
+    const inv = state.einkInverted;
+    const vars = inv
+      ? { tb:['#444','#333'], sel:['#555','#444'], bg:['#111','#0a0a0a'], pf:['#888','#aaa'],
+          pt:'rgba(255,255,255,0.15)', ic:'#ddd', ib:'rgba(255,255,255,0.12)', sc:'#fff',
+          cc:'#ccc', sb:'#0a0a0a', ns:'#eee', na:'#aaa', nx:'#777', nt:'#888', lt:'#aaa' }
+      : { tb:['#666','#555'], sel:['#444','#333'], bg:['#f2f2f2','#e8e8e8'], pf:['#555','#333'],
+          pt:'rgba(0,0,0,0.15)', ic:'#111', ib:'rgba(0,0,0,0.12)', sc:'#fff',
+          cc:'#333', sb:'#e8e8e8', ns:'#111', na:'#444', nx:'#666', nt:'#555', lt:'#444' };
+    r.setProperty('--tb-bg',       `linear-gradient(180deg, ${vars.tb[0]} 0%, ${vars.tb[1]} 100%)`);
+    r.setProperty('--sel-bg',      `linear-gradient(180deg, ${vars.sel[0]} 0%, ${vars.sel[1]} 100%)`);
+    const screenBg = `linear-gradient(180deg, ${vars.bg[0]} 0%, ${vars.bg[1]} 100%)`;
+    r.setProperty('--list-bg', screenBg); r.setProperty('--nowplay-bg', screenBg);
+    r.setProperty('--prog-fill',   `linear-gradient(90deg, ${vars.pf[0]}, ${vars.pf[1]})`);
+    r.setProperty('--prog-track',  vars.pt);
+    r.setProperty('--item-color',  vars.ic); r.setProperty('--item-border', vars.ib);
+    r.setProperty('--sel-color',   vars.sc);
+    r.setProperty('--ctrl-color',  vars.cc); r.setProperty('--spin-color', vars.cc);
+    r.setProperty('--screen-bg',   vars.sb);
+    r.setProperty('--np-song', vars.ns); r.setProperty('--np-artist', vars.na);
+    r.setProperty('--np-album', vars.nx); r.setProperty('--np-times', vars.nt);
+    r.setProperty('--load-text', vars.lt);
   } else {
-    const screenBg  = `linear-gradient(180deg, hsl(${h},28%,78%) 0%, hsl(${h},28%,68%) 100%)`;
-    r.setProperty('--tb-bg',       `linear-gradient(180deg, hsl(${h},48%,52%) 0%, hsl(${h},48%,40%) 100%)`);
-    r.setProperty('--sel-bg',      `linear-gradient(180deg, hsl(${h},52%,42%) 0%, hsl(${h},52%,28%) 100%)`);
-    r.setProperty('--list-bg',     screenBg);
-    r.setProperty('--nowplay-bg',  screenBg);
-    r.setProperty('--prog-fill',   `linear-gradient(90deg, hsl(${h},52%,36%), hsl(${h},52%,52%))`);
-    r.setProperty('--prog-track',  `rgba(0,0,0,0.18)`);
-    r.setProperty('--item-color',  `hsl(${h},45%,16%)`);
-    r.setProperty('--item-border', `rgba(255,255,255,0.42)`);
-    r.setProperty('--sel-color',   `white`);
-    r.setProperty('--ctrl-color',  `hsl(${h},45%,18%)`);
-    r.setProperty('--spin-color',  `hsl(${h},52%,40%)`);
-    r.setProperty('--screen-bg',   `hsl(${h},28%,66%)`);
-    r.setProperty('--np-song',     `hsl(${h},45%,14%)`);
-    r.setProperty('--np-artist',   `hsl(${h},40%,26%)`);
-    r.setProperty('--np-album',    `hsl(${h},35%,38%)`);
-    r.setProperty('--np-times',    `hsl(${h},38%,28%)`);
-    r.setProperty('--load-text',   `hsl(${h},42%,20%)`);
+    _setAccent(r, h, _accentCfg(h, mode));
   }
 
-  // — iPod body —
-  if (dm) {
+  // ── iPod body ──
+  if (mode === 'eink') {
+    const inv = state.einkInverted;
+    if (inv) {
+      r.setProperty('--pod-bg',       'linear-gradient(170deg, #1a1a1a 0%, #0d0d0d 60%, #080808 100%)');
+      r.setProperty('--pod-shadow',   '0 0 0 1px rgba(255,255,255,0.05) inset, 0 30px 80px rgba(0,0,0,0.95)');
+      r.setProperty('--bezel-shadow', '0 2px 8px rgba(0,0,0,0.95) inset');
+      r.setProperty('--wheel-bg',     'linear-gradient(145deg, #181818 0%, #0a0a0a 50%, #141414 100%)');
+      r.setProperty('--wheel-shadow', '0 0 0 1px rgba(255,255,255,0.03) inset, 0 3px 8px rgba(0,0,0,0.9)');
+      r.setProperty('--center-bg',    'linear-gradient(145deg, #151515 0%, #0a0a0a 100%)');
+      r.setProperty('--center-color', '#888');
+      r.setProperty('--center-shadow','0 0 0 1px rgba(255,255,255,0.08) inset, 0 2px 6px rgba(0,0,0,0.9)');
+      r.setProperty('--wheel-label',  '#555');
+    } else {
+      r.setProperty('--pod-bg',       'linear-gradient(170deg, #f0f0f0 0%, #ddd 60%, #ccc 100%)');
+      r.setProperty('--pod-shadow',   '0 0 0 1px rgba(255,255,255,0.85) inset, 0 30px 80px rgba(0,0,0,0.4)');
+      r.setProperty('--bezel-shadow', '0 2px 8px rgba(0,0,0,0.6) inset, 0 1px 0 rgba(255,255,255,0.3)');
+      r.setProperty('--wheel-bg',     'linear-gradient(145deg, #e0e0e0 0%, #ccc 50%, #d8d8d8 100%)');
+      r.setProperty('--wheel-shadow', '0 0 0 1px rgba(255,255,255,0.6) inset, 0 3px 8px rgba(0,0,0,0.25)');
+      r.setProperty('--center-bg',    'linear-gradient(145deg, #eee 0%, #ddd 100%)');
+      r.setProperty('--center-color', '#444');
+      r.setProperty('--center-shadow','0 0 0 1px rgba(255,255,255,0.7) inset, 0 2px 6px rgba(0,0,0,0.2)');
+      r.setProperty('--wheel-label',  '#555');
+    }
+  } else if (mode === 'oled') {
+    r.setProperty('--pod-bg',       '#000');
+    r.setProperty('--pod-shadow',   '0 0 0 1px rgba(255,255,255,0.03) inset, 0 30px 80px rgba(0,0,0,1)');
+    r.setProperty('--bezel-shadow', '0 2px 8px rgba(0,0,0,1) inset');
+    r.setProperty('--wheel-bg',     'linear-gradient(145deg, #0a0a0a 0%, #000 50%, #080808 100%)');
+    r.setProperty('--wheel-shadow', `0 0 0 1px rgba(255,255,255,0.03) inset, 0 3px 8px rgba(0,0,0,1), 0 0 20px hsla(${h},60%,40%,0.08)`);
+    r.setProperty('--center-bg',    'linear-gradient(145deg, #0c0c0c 0%, #000 100%)');
+    r.setProperty('--center-color', `hsl(${h},55%,48%)`);
+    r.setProperty('--center-shadow',`0 0 0 1px hsla(${h},55%,40%,0.22) inset, 0 2px 6px rgba(0,0,0,1)`);
+    r.setProperty('--wheel-label',  `hsl(${h},35%,30%)`);
+  } else if (dm) {
     r.setProperty('--pod-bg',
       `linear-gradient(170deg, hsl(${ph},${ps2}%,18%) 0%, hsl(${ph},${ps2}%,11%) 60%, hsl(${ph},${ps2}%,7%) 100%)`);
     r.setProperty('--pod-shadow',
@@ -223,7 +342,11 @@ function applyTheme() {
 
   // Keep PWA status bar colour in sync with active theme
   const tcMeta = document.querySelector('meta[name="theme-color"]');
-  if (tcMeta) tcMeta.content = dm ? `hsl(${h},52%,10%)` : `hsl(${h},48%,42%)`;
+  if (tcMeta) {
+    if (mode === 'eink') tcMeta.content = state.einkInverted ? '#0a0a0a' : '#e8e8e8';
+    else if (mode === 'oled') tcMeta.content = '#000';
+    else tcMeta.content = dm ? `hsl(${h},52%,10%)` : `hsl(${h},48%,42%)`;
+  }
 }
 
 function saveTheme() {
@@ -268,7 +391,7 @@ const BRANDS = {
 
 function applySetupBranding() {
   const brandKey = BRANDS[state.serverType] ? state.serverType : 'plex';
-  const b = BRANDS[brandKey][state.darkMode ? 'dark' : 'light'];
+  const b = BRANDS[brandKey][isDark() ? 'dark' : 'light'];
   const r = document.documentElement.style;
   r.setProperty('--su-bg',          b.bg);
   r.setProperty('--su-title',       b.title);
@@ -283,24 +406,26 @@ function applySetupBranding() {
 }
 
 // ═══════════════════════════════════════════
-//  DARK MODE
+//  THEME MODE
 // ═══════════════════════════════════════════
-function applyDarkMode() {
-  document.body.classList.toggle('dark-mode', state.darkMode);
-  document.body.classList.toggle('dark-page', state.darkMode);
-  applyTheme();        // always theme the pod shell (body, wheel, bezel)
-  applySetupBranding(); // setup screen content colors (no-op when not on setup)
+function applyThemeMode() {
+  const dm = isDark();
+  document.body.classList.toggle('dark-mode', dm);
+  document.body.classList.toggle('dark-page', dm);
+  VALID_MODES.forEach(m => document.body.classList.toggle('theme-' + m, m === state.themeMode));
+  applyTheme();
+  applySetupBranding();
 }
 
-function toggleDarkMode() {
-  state.darkMode = !state.darkMode;
-  localStorage.setItem('darkMode', state.darkMode);
-  applyDarkMode();
-  const m = currentMenu();
-  if (m && m.title === 'Settings') {
-    m.items[0].label = state.darkMode ? '☀️ Light Mode' : '🌙 Dark Mode';
-    if (state.view === 'menu') render();
+function setThemeMode(mode) {
+  if (!VALID_MODES.includes(mode)) return;
+  state.themeMode = mode;
+  localStorage.setItem('themeMode', mode);
+  if (THEME_DEFAULT_HUES[mode] != null) {
+    state.theme.uiHue = THEME_DEFAULT_HUES[mode];
+    saveTheme();
   }
+  applyThemeMode();
 }
 
 // ═══════════════════════════════════════════
@@ -482,11 +607,11 @@ function updateThemePanel() {
   const ph = state.theme.podHue;
   const ps = state.theme.podSat;
 
-  uiSwatch.style.background = state.darkMode
+  uiSwatch.style.background = isDark()
     ? `linear-gradient(135deg, hsl(${h},52%,20%), hsl(${h},52%,13%))`
     : `linear-gradient(135deg, hsl(${h},48%,52%), hsl(${h},48%,40%))`;
 
-  podSwatch.style.background = state.darkMode
+  podSwatch.style.background = isDark()
     ? `linear-gradient(135deg, hsl(${ph},${Math.round(ps*0.55)}%,18%), hsl(${ph},${Math.round(ps*0.55)}%,11%))`
     : `linear-gradient(135deg, hsl(${ph},${ps}%,92%), hsl(${ph},${ps}%,78%))`;
 
@@ -885,6 +1010,60 @@ function toggleShuffle() {
   localStorage.setItem('shuffle', state.shuffle);
 }
 
+// ── Track rating ─────────────────────────────────────────────────────────────
+// Plex uses 0–10 scale (userRating). We map to 1–5 stars: star N = N*2.
+function getTrackStars(track) {
+  const r = track?.userRating;
+  if (r == null || r <= 0) return 0;
+  return Math.round(r / 2);
+}
+
+async function rateTrack(track, stars) {
+  if (!track || !track.ratingKey) return;
+  // stars 0 = clear, 1–5 = set rating (Plex scale: stars * 2)
+  const plexRating = Math.max(0, Math.min(10, stars * 2));
+  track.userRating = plexRating || 0;
+  // Update UI immediately
+  updateStarsUI();
+  vibe(stars > 0 ? HAPTIC.select : HAPTIC.tick);
+  // Fire-and-forget API call
+  try {
+    const key = encodeURIComponent(track.ratingKey);
+    await proxiedFetch(
+      `${state.plexUrl}/:/rate?key=${key}&identifier=com.plexapp.plugins.library&rating=${plexRating}`,
+      { method: 'PUT', headers: { 'X-Plex-Token': state.plexToken } }
+    );
+  } catch (_) {} // silent fail — rating is saved locally regardless
+}
+
+function starsHtml(track) {
+  const filled = getTrackStars(track);
+  return Array.from({ length: 5 }, (_, i) => {
+    const n = i + 1;
+    const cls = n <= filled ? 'np-star filled' : 'np-star';
+    return `<span class="${cls}" data-star="${n}">★</span>`;
+  }).join('');
+}
+
+function updateStarsUI() {
+  const row = document.querySelector('.np-stars');
+  if (!row || !state.currentTrack) return;
+  row.innerHTML = starsHtml(state.currentTrack);
+  wireStars(row);
+}
+
+function wireStars(container) {
+  container.querySelectorAll('.np-star').forEach(star => {
+    star.addEventListener('click', () => {
+      const n = parseInt(star.dataset.star, 10);
+      if (isNaN(n)) return;
+      const current = getTrackStars(state.currentTrack);
+      // Tap same star again = clear rating
+      rateTrack(state.currentTrack, n === current ? 0 : n);
+    });
+  });
+}
+
 // ── Sleep timer ──────────────────────────────────────────────────────────────
 const SLEEP_OPTIONS = [0, 15, 30, 60, 90];
 function sleepLabel() {
@@ -1017,16 +1196,76 @@ function cycleHaptic() {
   if (item) { item.label = hapticLabel(); render(); }
 }
 
+function themeMenuLabel() {
+  return `🎨 Theme: ${THEME_LABELS[state.themeMode] || state.themeMode}`;
+}
+
+function openThemeMenu() {
+  const items = VALID_MODES.map(m => ({
+    label: `${THEME_LABELS[m]}${m === state.themeMode ? ' ✓' : ''}`,
+    arrow: false,
+    action: () => {
+      setThemeMode(m);
+      // Rebuild theme menu labels to move checkmark
+      const menu = currentMenu();
+      if (menu) menu.items.forEach((it, i) => {
+        it.label = `${THEME_LABELS[VALID_MODES[i]]}${VALID_MODES[i] === state.themeMode ? ' ✓' : ''}`;
+      });
+      // Update parent settings menu label
+      const parent = state.navStack[state.navStack.length - 2];
+      const themeItem = parent?.items.find(i => i._id === 'theme');
+      if (themeItem) themeItem.label = themeMenuLabel();
+      render();
+    }
+  }));
+  // For e-ink, add invert toggle
+  if (state.themeMode === 'eink') {
+    items.push({
+      label: state.einkInverted ? '◑ E-Ink: White on Black' : '◐ E-Ink: Black on White',
+      arrow: false,
+      action: () => {
+        state.einkInverted = !state.einkInverted;
+        localStorage.setItem('einkInverted', state.einkInverted);
+        applyThemeMode();
+        // Update the invert label
+        const menu = currentMenu();
+        const inv = menu?.items[menu.items.length - 1];
+        if (inv) inv.label = state.einkInverted ? '◑ E-Ink: White on Black' : '◐ E-Ink: Black on White';
+        render();
+      }
+    });
+  }
+  pushMenu('Theme', items);
+}
+
+function openAbout() {
+  state.navStack.push({
+    title: 'About', selectedIndex: 0,
+    items: [
+      { label: 'MediaPod', arrow: false, action: () => {} },
+      { label: 'Created by Dalek ☕🫰', arrow: false, action: () => window.open('https://dalek.coffee', '_blank') },
+      { label: 'Built with Claude', arrow: false, action: () => {} },
+      { label: '↗ dalek.coffee', arrow: false, action: () => window.open('https://dalek.coffee', '_blank') },
+    ]
+  });
+  state.view = 'menu'; render();
+}
+
 function openSettings() {
   state.navStack.push({
     title: 'Settings', selectedIndex: 0,
     items: [
-      { label: state.darkMode ? '☀️ Light Mode' : '🌙 Dark Mode', arrow: false, action: () => {
-          toggleDarkMode();
-          currentMenu().items[0].label = state.darkMode ? '☀️ Light Mode' : '🌙 Dark Mode';
-          render();
+      { _id: 'theme', label: themeMenuLabel(), arrow: true, action: openThemeMenu },
+      { label: '🎨 Customize Colors', arrow: false, action: () => {
+          if (state.themeMode === 'eink') {
+            // E-ink has no color customization — just toggle invert
+            state.einkInverted = !state.einkInverted;
+            localStorage.setItem('einkInverted', state.einkInverted);
+            applyThemeMode(); render();
+          } else {
+            openThemePanel();
+          }
       }},
-      { label: '🎨 Customize Theme', arrow: false, action: () => { openThemePanel(); }},
       { _id: 'lb', label: state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off', arrow: true, action: () => {
           state.view = 'lbsetup'; render();
       }},
@@ -1036,6 +1275,7 @@ function openSettings() {
       { _id: 'fullscreen', label: state.fullscreen ? '✕ Exit Fullscreen' : '⛶ Fullscreen', arrow: false, action: () => {
           toggleFullscreen();
       }},
+      { label: 'About', arrow: true, action: openAbout },
       { label: 'Disconnect', arrow: false, action: () => {
           state.audio.pause();
           stopPlexPoll();
@@ -1441,7 +1681,7 @@ async function startPlexOAuth() {
 
 function renderPlexWaiting(code) {
   const screen = document.getElementById('screen');
-  const brand  = BRANDS.plex[state.darkMode ? 'dark' : 'light'];
+  const brand  = BRANDS.plex[isDark() ? 'dark' : 'light'];
   screen.innerHTML = `
     ${DALEK_BANNER}
     <div class="setup-screen">
@@ -1492,7 +1732,7 @@ async function completePlexAuth(token) {
 
 function renderPlexServerPicker(servers, token) {
   const screen = document.getElementById('screen');
-  const brand  = BRANDS.plex[state.darkMode ? 'dark' : 'light'];
+  const brand  = BRANDS.plex[isDark() ? 'dark' : 'light'];
   const rows = servers.map((s, i) =>
     `<button class="setup-btn srv-pick" data-i="${i}"
       style="background:rgba(0,0,0,0.2);font-size:clamp(9px,2.2vw,11px);text-align:left;padding:5px 8px;margin:0">
@@ -1592,7 +1832,7 @@ function renderSetup(screen) {
   applySetupBranding();
   stopPlexPoll();
   const isOAuth = state.serverType !== 'manual';
-  const brand   = BRANDS['plex'][state.darkMode ? 'dark' : 'light'];
+  const brand   = BRANDS['plex'][isDark() ? 'dark' : 'light'];
 
   screen.innerHTML = `
     ${DALEK_BANNER}
@@ -1830,6 +2070,7 @@ function renderNowPlaying(screen) {
         <span class="np-ctrl-btn" id="np-next">⏭</span>
         <span class="np-ctrl-btn np-ctrl-side${state.repeat !== 'off' ? ' np-active' : ''}" id="np-repeat">${state.repeat === 'one' ? '↺¹' : '↺'}</span>
       </div>
+      <div class="np-stars">${starsHtml(t)}</div>
       <div class="np-sleep-row">
         <span class="np-sleep-badge" id="np-sleep">${state.sleepEndsAt ? `💤 ${Math.max(1, Math.ceil((state.sleepEndsAt - Date.now()) / 60000))}m` : ''}</span>
       </div>
@@ -1839,6 +2080,10 @@ function renderNowPlaying(screen) {
   // Set blur background via DOM to avoid CSS injection through inline style
   const blurDiv = el.querySelector('.np-bg-blur');
   if (blurDiv && bgThumb) blurDiv.style.backgroundImage = `url("${bgThumb.replace(/["\\]/g, '\\$&')}")`;
+
+  // Wire star rating
+  const starsRow = el.querySelector('.np-stars');
+  if (starsRow) wireStars(starsRow);
 
   el.querySelector('#np-play').addEventListener('click', togglePlay);
   el.querySelector('#np-prev').addEventListener('click', prevTrack);
@@ -2196,14 +2441,20 @@ document.addEventListener('keydown', e => {
     case 'Escape': case 'Backspace': goBack(); break;
     case ' ':          if (state.currentTrack) { e.preventDefault(); togglePlay(); } break;
     case 'f': case 'F': toggleFullscreen(); break;
-    case 'd': case 'D': toggleDarkMode(); break;
+    case 'd': case 'D': {
+      const modes = VALID_MODES;
+      const idx = modes.indexOf(state.themeMode);
+      setThemeMode(modes[(idx + 1) % modes.length]);
+      if (state.view === 'menu') render();
+      break;
+    }
   }
 });
 
 // ═══════════════════════════════════════════
 //  BOOT
 // ═══════════════════════════════════════════
-applyDarkMode();      // sets dark-mode class + calls applySetupBranding
+applyThemeMode();     // sets theme classes + calls applySetupBranding
 initThemePanel();     // wires up hue rings, presets, reset
 autoScale();          // scale iPod to fill viewport immediately
 

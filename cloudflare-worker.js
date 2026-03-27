@@ -5,7 +5,7 @@
 // known Plex hosts. No credentials are logged.
 
 const ALLOWED_ORIGIN  = 'https://pod.dalek.coffee';
-const ALLOWED_METHODS = new Set(['GET', 'POST', 'OPTIONS']);
+const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'OPTIONS']);
 const MAX_BODY_BYTES  = 1024 * 64; // 64 KB — Plex API payloads are tiny
 
 // Headers we explicitly allow in CORS preflights
@@ -96,7 +96,7 @@ export default {
       const res = await fetch(targetUrl, {
         method:  request.method,
         headers: proxyHeaders,
-        body:    request.method === 'POST' ? request.body : undefined,
+        body:    (request.method === 'POST' || request.method === 'PUT') ? request.body : undefined,
       });
 
       // Stream the response back; rewrite CORS headers so the browser accepts it
@@ -119,7 +119,7 @@ export default {
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin':  ALLOWED_ORIGIN,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
     'Access-Control-Allow-Headers': CORS_ALLOW_HEADERS,
     'Access-Control-Max-Age':       '86400',
   };
