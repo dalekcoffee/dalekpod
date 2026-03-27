@@ -682,6 +682,14 @@ async function fetchRemoteSessions() {
   return (data?.MediaContainer?.Metadata || []).filter(s => s.Player);
 }
 
+async function fetchControllableIds() {
+  try {
+    const data = await plexFetch('/clients');
+    const clients = data?.MediaContainer?.Server || data?.MediaContainer?.Client || [];
+    return new Set(clients.map(c => c.machineIdentifier).filter(Boolean));
+  } catch (_) { return new Set(); }
+}
+
 async function plexCommand(action, params = {}) {
   if (!state.remoteSession?.Player) throw new Error('No remote session');
   const machineId = state.remoteSession.Player.machineIdentifier;
@@ -746,28 +754,30 @@ function startRemotePoll() {
 async function openRemote() {
   showLoading('Fetching sessions…');
   try {
-    const sessions = await fetchRemoteSessions();
+    const [sessions, controllableIds] = await Promise.all([
+      fetchRemoteSessions(),
+      fetchControllableIds(),
+    ]);
     if (!sessions.length) {
       pushMenu('Remote', [{ label: 'No active sessions', arrow: false, action: () => {} }]);
       return;
     }
-    if (sessions.length === 1) {
-      state.remoteSession = sessions[0];
+    // Annotate each session with whether the server can relay commands to it
+    sessions.forEach(s => {
+      s._controllable = controllableIds.size === 0 || controllableIds.has(s.Player?.machineIdentifier);
+    });
+    const openSession = s => {
+      state.remoteSession = s;
       state.view = 'remote';
       startRemotePoll();
       render();
-      return;
-    }
+    };
+    if (sessions.length === 1) { openSession(sessions[0]); return; }
     pushMenu('Remote', sessions.map(s => ({
       label:    esc(s.Player?.title || 'Unknown client'),
-      sublabel: `${s.grandparentTitle ? esc(s.grandparentTitle) + ' — ' : ''}${esc(s.title || '')}`,
+      sublabel: `${s.grandparentTitle ? esc(s.grandparentTitle) + ' — ' : ''}${esc(s.title || '')}${s._controllable ? '' : ' (view only)'}`,
       arrow: true,
-      action: () => {
-        state.remoteSession = s;
-        state.view = 'remote';
-        startRemotePoll();
-        render();
-      }
+      action: () => openSession(s),
     })));
   } catch(e) { showMenuError(e.message); }
 }
@@ -2185,8 +2195,9 @@ function renderRemote(screen) {
   const s = state.remoteSession;
   if (!s?.Player) { state.view = 'menu'; render(); return; }
 
-  const clientName = s.Player.title || 'Remote';
-  const isPlaying  = s.Player.state === 'playing';
+  const clientName    = s.Player.title || 'Remote';
+  const isPlaying     = s.Player.state === 'playing';
+  const controllable  = s._controllable !== false;
   const posMs      = s.viewOffset || 0;
   const durMs      = s.duration   || 0;
   const pct        = durMs > 0 ? (posMs / durMs) * 100 : 0;
@@ -2217,13 +2228,14 @@ function renderRemote(screen) {
           <span>-${formatTime(Math.max(0, (durMs - posMs) / 1000))}</span>
         </div>
       </div>
-      <div class="np-controls">
+      <div class="np-controls" ${controllable ? '' : 'style="opacity:0.35;pointer-events:none"'}>
         <span class="np-ctrl-btn np-ctrl-side" style="visibility:hidden">⇄</span>
         <span class="np-ctrl-btn" id="rc-prev">⏮</span>
         <span class="np-ctrl-btn play-pause" id="rc-play">${playIcon}</span>
         <span class="np-ctrl-btn" id="rc-next">⏭</span>
         <span class="np-ctrl-btn np-ctrl-side" style="visibility:hidden">↺</span>
       </div>
+      ${!controllable ? '<div style="text-align:center;font-size:9px;opacity:0.5;padding-bottom:2px">View only — player not registered for control</div>' : ''}
     </div>`;
 
   if (bgThumb) {
@@ -2488,6 +2500,37 @@ function onRimMove(e) {
     }
 
     wheel.scrubTimer = setTimeout(commitScrub, SCRUB_EXIT_MS);
+
+  } else if (state.view === 'remote' && state.remoteSession?.Player) {
+    // Remote seek: accumulate degrees and seek on release (same cadence as local scrub)
+    const rs = state.remoteSession;
+    const dur = rs.duration || 0;
+    if (dur <= 0) return;
+    wheel.accum += delta;
+    const scrubSecs = delta / SCRUB_DEG_PER_SEC;
+    wheel.scrubLive = (wheel.scrubLive || 0) + scrubSecs;
+    // Live progress preview
+    const curMs  = rs.viewOffset || 0;
+    const previewMs = Math.max(0, Math.min(dur, curMs + wheel.scrubLive * 1000));
+    const pct = (previewMs / dur) * 100;
+    const fill  = document.querySelector('.np-progress-fill');
+    const times = document.querySelector('.np-times');
+    if (fill)  fill.style.width = pct + '%';
+    if (times) times.innerHTML  =
+      `<span>${formatTime(previewMs / 1000)}</span><span>-${formatTime(Math.max(0, (dur - previewMs) / 1000))}</span>`;
+    if (Math.abs(previewMs / 1000 - (wheel.lastScrubHapticAt || 0)) >= 5) {
+      vibe(HAPTIC.scrubTick);
+      wheel.lastScrubHapticAt = previewMs / 1000;
+    }
+    clearTimeout(wheel.scrubTimer);
+    wheel.scrubTimer = setTimeout(async () => {
+      const offsetMs = Math.max(0, Math.min(dur, curMs + wheel.scrubLive * 1000));
+      wheel.scrubLive = 0;
+      try {
+        await plexCommand('seekTo', { offset: Math.round(offsetMs) });
+        setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 400);
+      } catch(e) { showRemoteError(e.message); }
+    }, SCRUB_EXIT_MS);
   }
 }
 
@@ -2567,13 +2610,48 @@ function addZoneTap(id, action) {
 }
 
 addZoneTap('zone-top',    () => { vibe(HAPTIC.back); goBack(); });
-addZoneTap('zone-bottom', () => { if (state.currentTrack) { vibe(HAPTIC.select); togglePlay(); } });
-addZoneTap('zone-left',   () => { vibe(HAPTIC.tick); if (state.view === 'nowplaying') prevTrack(); else if (state.view === 'coverflow') cfNavigate(-1); else scrollMenu(-1); });
-addZoneTap('zone-right',  () => { vibe(HAPTIC.tick); if (state.view === 'nowplaying') nextTrack(); else if (state.view === 'coverflow') cfNavigate(1);  else scrollMenu(1);  });
+addZoneTap('zone-bottom', () => {
+  if (state.view === 'remote' && state.remoteSession?.Player) {
+    const rs = state.remoteSession;
+    vibe(HAPTIC.select);
+    plexCommand(rs.Player.state === 'playing' ? 'pause' : 'play')
+      .then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); })
+      .catch(e => showRemoteError(e.message));
+  } else if (state.currentTrack) { vibe(HAPTIC.select); togglePlay(); }
+});
+addZoneTap('zone-left', () => {
+  vibe(HAPTIC.tick);
+  if (state.view === 'remote' && state.remoteSession?.Player) {
+    plexCommand('skipPrevious')
+      .then(() => new Promise(r => setTimeout(r, 600)))
+      .then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); })
+      .catch(e => showRemoteError(e.message));
+  } else if (state.view === 'nowplaying') prevTrack();
+  else if (state.view === 'coverflow') cfNavigate(-1);
+  else scrollMenu(-1);
+});
+addZoneTap('zone-right', () => {
+  vibe(HAPTIC.tick);
+  if (state.view === 'remote' && state.remoteSession?.Player) {
+    plexCommand('skipNext')
+      .then(() => new Promise(r => setTimeout(r, 600)))
+      .then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); })
+      .catch(e => showRemoteError(e.message));
+  } else if (state.view === 'nowplaying') nextTrack();
+  else if (state.view === 'coverflow') cfNavigate(1);
+  else scrollMenu(1);
+});
 document.getElementById('wheel-center').addEventListener('click', () => {
   if (state.view === 'menu')           { vibe(HAPTIC.select); selectItem(); }
   else if (state.view === 'coverflow') { vibe(HAPTIC.select); cfOpenCurrentAlbum(); }
   else if (state.view === 'nowplaying') { vibe(HAPTIC.select); togglePlay(); }
+  else if (state.view === 'remote' && state.remoteSession?.Player) {
+    const rs = state.remoteSession;
+    vibe(HAPTIC.select);
+    plexCommand(rs.Player.state === 'playing' ? 'pause' : 'play')
+      .then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); })
+      .catch(e => showRemoteError(e.message));
+  }
   else if (state.view === 'setup') {
     // Trigger whichever primary action button is visible
     const btn = document.getElementById('plex-oauth-btn')
