@@ -673,86 +673,72 @@ body.native .spinner { width: 28px; height: 28px; border-width: 3px; }
   margin-bottom: 9px;
 }
 
-/* Hue ring */
-.tp-ring-row { display: flex; align-items: center; gap: 10px; }
-
-.hue-ring-wrap {
-  position: relative;
-  width: 76px; height: 76px;
-  flex-shrink: 0; cursor: crosshair;
-  border-radius: 50%;
+/* Hue strip slider */
+.hue-slider {
+  width: 100%; height: 14px;
+  -webkit-appearance: none; appearance: none;
+  background: linear-gradient(90deg,
+    hsl(0,90%,55%), hsl(60,90%,55%), hsl(120,90%,55%),
+    hsl(180,90%,55%), hsl(240,90%,55%), hsl(300,90%,55%), hsl(360,90%,55%));
+  border-radius: 7px; outline: none; cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+  margin-bottom: 8px; display: block;
 }
-.hue-ring-bg {
-  position: absolute; inset: 0; border-radius: 50%;
-  background: conic-gradient(
-    hsl(0,100%,50%) 0deg, hsl(30,100%,50%) 30deg,
-    hsl(60,100%,50%) 60deg, hsl(90,100%,50%) 90deg,
-    hsl(120,100%,50%) 120deg, hsl(150,100%,50%) 150deg,
-    hsl(180,100%,50%) 180deg, hsl(210,100%,50%) 210deg,
-    hsl(240,100%,50%) 240deg, hsl(270,100%,50%) 270deg,
-    hsl(300,100%,50%) 300deg, hsl(330,100%,50%) 330deg,
-    hsl(360,100%,50%) 360deg
-  );
-  pointer-events: none;
+.hue-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+  background: white; border: 2.5px solid rgba(0,0,0,0.18);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.55); cursor: pointer;
 }
-.hue-ring-hole {
-  position: absolute; inset: 20px; border-radius: 50%;
-  background: #111; pointer-events: none;
-}
-.hue-dot {
-  position: absolute; width: 9px; height: 9px; border-radius: 50%;
-  border: 2px solid white;
-  box-shadow: 0 1px 5px rgba(0,0,0,0.8);
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-  transition: background 0.08s;
+.hue-slider::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: white; border: 2px solid rgba(0,0,0,0.18);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.55); cursor: pointer;
 }
 
-.tp-swatch {
-  flex: 1; height: 52px; border-radius: 10px;
+/* Thin colour preview bar */
+.tp-swatch-bar {
+  height: 7px; border-radius: 4px; margin-bottom: 10px;
   border: 1px solid rgba(255,255,255,0.08);
-  transition: background 0.2s;
-  display: flex; align-items: flex-end; justify-content: center;
-  padding-bottom: 5px; font-size: 16px;
-  overflow: hidden;
-}
-.tp-swatch-label {
-  font-size: 8px; color: rgba(255,255,255,0.5);
-  text-align: center; margin-top: 4px;
-  letter-spacing: 0.5px;
+  transition: background 0.18s;
 }
 
 /* Tint slider */
-.sat-row { display: flex; align-items: center; gap: 7px; margin-top: 8px; }
+.sat-row { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
 .sat-row span { font-size: 8px; color: rgba(255,255,255,0.3); white-space: nowrap; }
 .sat-slider {
   flex: 1; -webkit-appearance: none; appearance: none;
-  height: 3px; border-radius: 2px; outline: none; cursor: pointer;
+  height: 4px; border-radius: 2px; outline: none; cursor: pointer;
   transition: background 0.2s;
 }
 .sat-slider::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 13px; height: 13px;
+  -webkit-appearance: none; width: 14px; height: 14px;
   border-radius: 50%; background: white;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.5); cursor: pointer;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.5); cursor: pointer;
 }
 .sat-slider::-moz-range-thumb {
-  width: 13px; height: 13px; border-radius: 50%; background: white;
-  border: none; box-shadow: 0 1px 4px rgba(0,0,0,0.5); cursor: pointer;
+  width: 12px; height: 12px; border-radius: 50%; background: white;
+  border: none; box-shadow: 0 1px 5px rgba(0,0,0,0.5); cursor: pointer;
 }
 
-/* Preset chips */
-.tp-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+/* Preset chips — color dot + label */
+.tp-presets { display: flex; gap: 5px; flex-wrap: wrap; }
 .tp-chip {
-  width: 22px; height: 22px; border-radius: 50%;
-  cursor: pointer; border: 2px solid transparent;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
-  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
-  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 5px 6px; border-radius: 8px; cursor: pointer;
+  border: 1.5px solid transparent;
+  background: rgba(255,255,255,0.04);
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+  min-width: 38px;
 }
-.tp-chip:hover { transform: scale(1.18); }
-.tp-chip.selected {
-  border-color: white;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.4), 0 2px 8px rgba(0,0,0,0.5);
+.tp-chip:hover { background: rgba(255,255,255,0.09); transform: translateY(-1px); }
+.tp-chip.selected { border-color: rgba(255,255,255,0.65); background: rgba(255,255,255,0.1); }
+.tp-chip-dot {
+  width: 18px; height: 18px; border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+}
+.tp-chip-name {
+  font-size: 7px; color: rgba(255,255,255,0.45);
+  white-space: nowrap; line-height: 1;
 }
 
 .tp-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 11px 0; }
@@ -801,17 +787,8 @@ body.native .spinner { width: 28px; height: 28px; border-width: 3px; }
   <!-- UI Accent -->
   <div class="tp-section">
     <div class="tp-label">Accent Color</div>
-    <div class="tp-ring-row">
-      <div class="hue-ring-wrap" id="ui-ring">
-        <div class="hue-ring-bg"></div>
-        <div class="hue-ring-hole"></div>
-        <div class="hue-dot" id="ui-dot"></div>
-      </div>
-      <div>
-        <div class="tp-swatch" id="ui-swatch"></div>
-        <div class="tp-swatch-label">Preview</div>
-      </div>
-    </div>
+    <input type="range" class="hue-slider" id="ui-hue" min="0" max="359" step="1" />
+    <div class="tp-swatch-bar" id="ui-swatch"></div>
     <div class="tp-presets" id="ui-presets"></div>
   </div>
 
@@ -820,21 +797,12 @@ body.native .spinner { width: 28px; height: 28px; border-width: 3px; }
   <!-- iPod Body -->
   <div class="tp-section">
     <div class="tp-label">iPod Body</div>
-    <div class="tp-ring-row">
-      <div class="hue-ring-wrap" id="pod-ring">
-        <div class="hue-ring-bg"></div>
-        <div class="hue-ring-hole"></div>
-        <div class="hue-dot" id="pod-dot"></div>
-      </div>
-      <div>
-        <div class="tp-swatch" id="pod-swatch">🎵</div>
-        <div class="tp-swatch-label">Body tint</div>
-      </div>
-    </div>
+    <input type="range" class="hue-slider" id="pod-hue" min="0" max="359" step="1" />
     <div class="sat-row">
       <span>Tint</span>
       <input type="range" class="sat-slider" id="pod-sat" min="0" max="55" step="1" />
     </div>
+    <div class="tp-swatch-bar" id="pod-swatch"></div>
     <div class="tp-presets" id="pod-presets"></div>
   </div>
 
