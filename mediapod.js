@@ -692,17 +692,22 @@ async function plexCommand(action, params = {}) {
   const mediaType = sessionType === 'track' ? 'music'
                   : (sessionType === 'episode' || sessionType === 'movie' || sessionType === 'clip') ? 'video'
                   : null;
-  const qsObj = { commandID: state.remoteCommandId, ...params };
+  // Plex server relay: /player/playback/{action}
+  // Token and client ID must be in the URL query string (not just headers) for
+  // the server relay to authenticate and route the command — matching python-plexapi.
+  // X-Plex-Target-Client-Identifier in the header tells the server which player to relay to.
+  const qsObj = {
+    commandID: state.remoteCommandId,
+    'X-Plex-Token': state.plexToken,
+    'X-Plex-Client-Identifier': PLEX_CLIENT_ID,
+    ...params,
+  };
   if (mediaType) qsObj.type = mediaType;
   const qs = new URLSearchParams(qsObj);
-  // Server relay path: /system/players/{machineId}/playback/{action}
-  // (not /player/playback/ which is the direct-to-player LAN endpoint)
-  const url = `${state.plexUrl}/system/players/${encodeURIComponent(machineId)}/playback/${action}?${qs}`;
+  const url = `${state.plexUrl}/player/playback/${action}?${qs}`;
   const res = await proxiedFetch(url, {
     headers: {
-      Accept: 'application/json',
-      'X-Plex-Token': state.plexToken,
-      'X-Plex-Client-Identifier': PLEX_CLIENT_ID,
+      'X-Plex-Target-Client-Identifier': machineId,
     }
   });
   if (!res.ok) throw new Error(`Remote command failed: HTTP ${res.status}`);
