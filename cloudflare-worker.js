@@ -73,8 +73,8 @@ export default {
     }
 
     const host = parsed.hostname.toLowerCase();
-    // Reject bare IPv4/IPv6 addresses — Plex uses domain names only
-    if (/^[\d.:[\]]+$/.test(host)) {
+    // Reject bare IPv4 (e.g. 1.2.3.4) and IPv6 (e.g. [::1]) addresses — Plex uses domain names only
+    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || /^\[[\da-f:]+\]$/.test(host)) {
       return new Response('IP addresses not allowed', { status: 403 });
     }
     const isAllowedHost = host.endsWith('.plex.direct')
