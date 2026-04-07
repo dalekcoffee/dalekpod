@@ -102,9 +102,6 @@ const state = {
     podHue: clampInt(localStorage.getItem('themePodHue'), 0, 359, 0),
     podSat: clampInt(localStorage.getItem('themePodSat'), 0, 55,  0),
   },
-  remoteSession:   null,  // active Plex session being controlled
-  remoteCommandId: 0,
-  remotePollTimer: null,
 };
 
 const DEFAULT_THEME = { uiHue: 0, podHue: 0, podSat: 0 };
@@ -675,112 +672,6 @@ async function plexFetch(path) {
   return safeJson(res);
 }
 
-// ── Remote control — Plex player API ──
-
-async function fetchRemoteSessions() {
-  const data = await plexFetch('/status/sessions');
-  return (data?.MediaContainer?.Metadata || []).filter(s => s.Player);
-}
-
-async function fetchControllableIds() {
-  try {
-    const data = await plexFetch('/clients');
-    const clients = data?.MediaContainer?.Server || data?.MediaContainer?.Client || [];
-    return new Set(clients.map(c => c.machineIdentifier).filter(Boolean));
-  } catch (_) { return new Set(); }
-}
-
-async function plexCommand(action, params = {}) {
-  if (!state.remoteSession?.Player) throw new Error('No remote session');
-  const machineId = state.remoteSession.Player.machineIdentifier;
-  if (!machineId || !/^[a-zA-Z0-9_-]+$/.test(machineId)) throw new Error('Invalid client identifier');
-  state.remoteCommandId++;
-  // Derive media type from session so video sessions aren't sent type=music
-  const sessionType = state.remoteSession.type;
-  const mediaType = sessionType === 'track' ? 'music'
-                  : (sessionType === 'episode' || sessionType === 'movie' || sessionType === 'clip') ? 'video'
-                  : null;
-  // Plex server relay: /player/playback/{action}
-  // Token and client ID must be in the URL query string (not just headers) for
-  // the server relay to authenticate and route the command — matching python-plexapi.
-  // X-Plex-Target-Client-Identifier in the header tells the server which player to relay to.
-  const qsObj = {
-    commandID: state.remoteCommandId,
-    'X-Plex-Token': state.plexToken,
-    'X-Plex-Client-Identifier': PLEX_CLIENT_ID,
-    ...params,
-  };
-  if (mediaType) qsObj.type = mediaType;
-  const qs = new URLSearchParams(qsObj);
-  const url = `${state.plexUrl}/player/playback/${action}?${qs}`;
-  const res = await proxiedFetch(url, {
-    headers: {
-      'X-Plex-Target-Client-Identifier': machineId,
-    }
-  });
-  if (!res.ok) throw new Error(`Remote command failed: HTTP ${res.status}`);
-}
-
-async function refreshRemoteSession() {
-  if (!state.remoteSession?.Player) return;
-  const machineId = state.remoteSession.Player.machineIdentifier;
-  try {
-    const sessions = await fetchRemoteSessions();
-    const updated = sessions.find(s => s.Player?.machineIdentifier === machineId);
-    if (updated) {
-      state.remoteSession = updated;
-    } else {
-      clearRemotePoll();
-      state.remoteSession = null;
-      state.view = 'menu';
-      render();
-    }
-  } catch (_) {}
-}
-
-function clearRemotePoll() {
-  if (state.remotePollTimer) { clearInterval(state.remotePollTimer); state.remotePollTimer = null; }
-}
-
-function startRemotePoll() {
-  clearRemotePoll();
-  state.remotePollTimer = setInterval(async () => {
-    if (state.view !== 'remote') { clearRemotePoll(); return; }
-    await refreshRemoteSession();
-    if (state.view === 'remote') renderRemote();
-  }, 5000);
-}
-
-async function openRemote() {
-  showLoading('Fetching sessions…');
-  try {
-    const [sessions, controllableIds] = await Promise.all([
-      fetchRemoteSessions(),
-      fetchControllableIds(),
-    ]);
-    if (!sessions.length) {
-      pushMenu('Remote', [{ label: 'No active sessions', arrow: false, action: () => {} }]);
-      return;
-    }
-    // Annotate each session with whether the server can relay commands to it
-    sessions.forEach(s => {
-      s._controllable = controllableIds.size === 0 || controllableIds.has(s.Player?.machineIdentifier);
-    });
-    const openSession = s => {
-      state.remoteSession = s;
-      state.view = 'remote';
-      startRemotePoll();
-      render();
-    };
-    if (sessions.length === 1) { openSession(sessions[0]); return; }
-    pushMenu('Remote', sessions.map(s => ({
-      label:    esc(s.Player?.title || 'Unknown client'),
-      sublabel: `${s.grandparentTitle ? esc(s.grandparentTitle) + ' — ' : ''}${esc(s.title || '')}${s._controllable ? '' : ' (view only)'}`,
-      arrow: true,
-      action: () => openSession(s),
-    })));
-  } catch(e) { showMenuError(e.message); }
-}
 
 // Generic placeholder for items without artwork — inline SVG, no external dep
 const PLACEHOLDER_THUMB = `data:image/svg+xml,${encodeURIComponent(
@@ -1181,7 +1072,6 @@ function cycleCrossfade() {
 }
 
 function goBack() {
-  if (state.view === 'remote')     { clearRemotePoll(); state.remoteSession = null; state.view = 'menu'; render(); return; }
   if (state.view === 'nowplaying') { state.view = 'menu'; render(); return; }
   if (state.view === 'lbsetup')    { state.view = 'menu'; render(); return; }
   if (state.view === 'coverflow')  { if (cfAnim.raf) { cancelAnimationFrame(cfAnim.raf); cfAnim.raf = null; } state.returnToCoverFlow = false; state.view = 'menu'; render(); return; }
@@ -1229,7 +1119,6 @@ function buildMainMenu() {
       { label: 'Cover Flow',  arrow: true, action: openCoverFlow },
       { label: 'Music',       arrow: true, action: openMusicMenu },
       { label: 'Now Playing', arrow: true, action: () => { if (state.currentTrack) { state.view = 'nowplaying'; render(); } } },
-      { label: 'Remote',      arrow: true, action: openRemote },
       { label: 'Settings',   arrow: true, action: openSettings },
     ]
   };
@@ -1319,7 +1208,7 @@ function openSettings() {
     title: 'Settings', selectedIndex: 0,
     items: [
       { _id: 'theme', label: themeMenuLabel(), arrow: true, action: openThemeMenu },
-      { _id: 'lb', label: state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off', arrow: true, action: () => {
+      { _id: 'lb', label: state.lbToken ? '🔗 Scrobbling: On' : '🔗 Scrobbling: Off', arrow: true, action: () => {
           state.view = 'lbsetup'; render();
       }},
       { _id: 'haptic',     label: hapticLabel(),     arrow: false, action: cycleHaptic },
@@ -1623,7 +1512,6 @@ function render() {
   const screen = document.getElementById('screen');
   if (state.view === 'setup')           renderSetup(screen);
   else if (state.view === 'nowplaying') renderNowPlaying(screen);
-  else if (state.view === 'remote')     renderRemote(screen);
   else if (state.view === 'coverflow')  renderCoverFlow(screen);
   else if (state.view === 'menu')       renderMenu(screen);
   else if (state.view === 'lbsetup')    renderLbSetup(screen);
@@ -2054,7 +1942,7 @@ function renderLbSetup(screen) {
     if (token) localStorage.setItem('lbToken', token);
     else localStorage.removeItem('lbToken');
     const item = currentMenu()?.items?.find(i => i._id === 'lb');
-    if (item) item.label = state.lbToken ? '♫ Scrobbling: On' : '♫ Scrobbling: Off';
+    if (item) item.label = state.lbToken ? '🔗 Scrobbling: On' : '🔗 Scrobbling: Off';
     state.view = 'menu'; render();
   });
   screen.querySelector('#lb-cancel').addEventListener('click', () => {
@@ -2064,7 +1952,7 @@ function renderLbSetup(screen) {
     state.lbToken = '';
     localStorage.removeItem('lbToken');
     const item = currentMenu()?.items?.find(i => i._id === 'lb');
-    if (item) item.label = '♫ Scrobbling: Off';
+    if (item) item.label = '🔗 Scrobbling: Off';
     state.view = 'menu'; render();
   });
 }
@@ -2177,116 +2065,6 @@ function renderNowPlaying(screen) {
   });
 }
 
-function showRemoteError(msg) {
-  const screen = document.getElementById('screen');
-  if (!screen) return;
-  screen.querySelectorAll('.rc-error-toast').forEach(e => e.remove());
-  const toast = document.createElement('div');
-  toast.className = 'rc-error-toast';
-  toast.style.cssText = 'position:absolute;bottom:44px;left:50%;transform:translateX(-50%);background:rgba(180,0,0,0.82);color:#fff;font-size:10px;padding:4px 10px;border-radius:8px;white-space:nowrap;pointer-events:none;z-index:10';
-  toast.textContent = '\u26a0 ' + msg;
-  screen.style.position = 'relative';
-  screen.appendChild(toast);
-  setTimeout(() => toast.remove(), 3500);
-}
-
-function renderRemote(screen) {
-  const el = screen || document.getElementById('screen');
-  const s = state.remoteSession;
-  if (!s?.Player) { state.view = 'menu'; render(); return; }
-
-  const clientName    = s.Player.title || 'Remote';
-  const isPlaying     = s.Player.state === 'playing';
-  const controllable  = s._controllable !== false;
-  const posMs      = s.viewOffset || 0;
-  const durMs      = s.duration   || 0;
-  const pct        = durMs > 0 ? (posMs / durMs) * 100 : 0;
-  const thumb      = plexThumb(s.thumb || s.parentThumb || s.grandparentThumb, 480);
-  const bgThumb    = plexThumb(s.thumb || s.parentThumb || s.grandparentThumb, 800);
-  const playIcon   = isPlaying
-    ? '<svg width="0.65em" height="0.8em" viewBox="0 0 7 9" style="display:inline-block;vertical-align:-0.05em"><rect x="0" y="0" width="2.5" height="9" rx="0.4" fill="currentColor"/><rect x="4.5" y="0" width="2.5" height="9" rx="0.4" fill="currentColor"/></svg>'
-    : '▶';
-
-  el.innerHTML = `
-    <div class="nowplaying-screen${bgThumb ? ' has-blur' : ''}">
-      ${bgThumb ? '<div class="np-bg-blur"></div>' : ''}
-      <div class="np-titlebar"><div class="title">📡 ${esc(clientName)}</div></div>
-      <div class="np-art">
-        ${thumb ? `<img id="rc-thumb" src="${esc(thumb)}" referrerpolicy="no-referrer" />` : '<div class="no-art">♪</div>'}
-      </div>
-      <div class="np-info">
-        <div class="np-song marquee"><span>${esc(s.title || 'Unknown')}</span></div>
-        <div class="np-artist marquee"><span>${esc(s.grandparentTitle || '')}</span></div>
-        <div class="np-album">${esc(s.parentTitle || '')}</div>
-      </div>
-      <div class="np-progress-area">
-        <div class="np-progress-bar" id="rc-bar">
-          <div class="np-progress-fill" style="width:${pct}%"></div>
-        </div>
-        <div class="np-times">
-          <span>${formatTime(posMs / 1000)}</span>
-          <span>-${formatTime(Math.max(0, (durMs - posMs) / 1000))}</span>
-        </div>
-      </div>
-      <div class="np-controls" ${controllable ? '' : 'style="opacity:0.35;pointer-events:none"'}>
-        <span class="np-ctrl-btn np-ctrl-side" style="visibility:hidden">⇄</span>
-        <span class="np-ctrl-btn" id="rc-prev">⏮</span>
-        <span class="np-ctrl-btn play-pause" id="rc-play">${playIcon}</span>
-        <span class="np-ctrl-btn" id="rc-next">⏭</span>
-        <span class="np-ctrl-btn np-ctrl-side" style="visibility:hidden">↺</span>
-      </div>
-      ${!controllable ? '<div style="text-align:center;font-size:9px;opacity:0.5;padding-bottom:2px">View only — player not registered for control</div>' : ''}
-    </div>`;
-
-  if (bgThumb) {
-    const blurDiv = el.querySelector('.np-bg-blur');
-    if (blurDiv) blurDiv.style.backgroundImage = `url("${bgThumb.replace(/["\\]/g, '\\$&')}")`;
-  }
-
-  const thumbImg = el.querySelector('#rc-thumb');
-  if (thumbImg) thumbImg.addEventListener('error', () => {
-    const art = thumbImg.parentElement;
-    if (art) art.innerHTML = '<div class="no-art">♪</div>';
-  }, { once: true });
-
-  el.querySelector('#rc-play').addEventListener('click', async () => {
-    try {
-      await plexCommand(isPlaying ? 'pause' : 'play');
-      await refreshRemoteSession();
-      if (state.view === 'remote') renderRemote();
-    } catch(e) { showRemoteError(e.message); }
-  });
-
-  el.querySelector('#rc-prev').addEventListener('click', async () => {
-    try {
-      await plexCommand('skipPrevious');
-      setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 600);
-    } catch(e) { showRemoteError(e.message); }
-  });
-
-  el.querySelector('#rc-next').addEventListener('click', async () => {
-    try {
-      await plexCommand('skipNext');
-      setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 600);
-    } catch(e) { showRemoteError(e.message); }
-  });
-
-  const bar = el.querySelector('#rc-bar');
-  if (bar && durMs > 0) bar.addEventListener('click', async e => {
-    const rect = bar.getBoundingClientRect();
-    const offsetMs = Math.round(((e.clientX - rect.left) / rect.width) * durMs);
-    try {
-      await plexCommand('seekTo', { offset: offsetMs });
-      setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 400);
-    } catch(e) { showRemoteError(e.message); }
-  });
-
-  requestAnimationFrame(() => {
-    el.querySelectorAll('.marquee').forEach(m => {
-      if (m.scrollWidth > m.clientWidth + 4) m.classList.add('active');
-    });
-  });
-}
 
 // ═══════════════════════════════════════════
 //  HAPTICS
@@ -2501,36 +2279,6 @@ function onRimMove(e) {
 
     wheel.scrubTimer = setTimeout(commitScrub, SCRUB_EXIT_MS);
 
-  } else if (state.view === 'remote' && state.remoteSession?.Player) {
-    // Remote seek: accumulate degrees and seek on release (same cadence as local scrub)
-    const rs = state.remoteSession;
-    const dur = rs.duration || 0;
-    if (dur <= 0) return;
-    wheel.accum += delta;
-    const scrubSecs = delta / SCRUB_DEG_PER_SEC;
-    wheel.scrubLive = (wheel.scrubLive || 0) + scrubSecs;
-    // Live progress preview
-    const curMs  = rs.viewOffset || 0;
-    const previewMs = Math.max(0, Math.min(dur, curMs + wheel.scrubLive * 1000));
-    const pct = (previewMs / dur) * 100;
-    const fill  = document.querySelector('.np-progress-fill');
-    const times = document.querySelector('.np-times');
-    if (fill)  fill.style.width = pct + '%';
-    if (times) times.innerHTML  =
-      `<span>${formatTime(previewMs / 1000)}</span><span>-${formatTime(Math.max(0, (dur - previewMs) / 1000))}</span>`;
-    if (Math.abs(previewMs / 1000 - (wheel.lastScrubHapticAt || 0)) >= 5) {
-      vibe(HAPTIC.scrubTick);
-      wheel.lastScrubHapticAt = previewMs / 1000;
-    }
-    clearTimeout(wheel.scrubTimer);
-    wheel.scrubTimer = setTimeout(async () => {
-      const offsetMs = Math.max(0, Math.min(dur, curMs + wheel.scrubLive * 1000));
-      wheel.scrubLive = 0;
-      try {
-        await plexCommand('seekTo', { offset: Math.round(offsetMs) });
-        setTimeout(async () => { await refreshRemoteSession(); if (state.view === 'remote') renderRemote(); }, 400);
-      } catch(e) { showRemoteError(e.message); }
-    }, SCRUB_EXIT_MS);
   }
 }
 
@@ -2611,33 +2359,17 @@ function addZoneTap(id, action) {
 
 addZoneTap('zone-top',    () => { vibe(HAPTIC.back); goBack(); });
 addZoneTap('zone-bottom', () => {
-  if (state.view === 'remote' && state.remoteSession?.Player) {
-    const rs = state.remoteSession;
-    vibe(HAPTIC.select);
-    plexCommand(rs.Player.state === 'playing' ? 'pause' : 'play')
-      .then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); })
-      .catch(e => showRemoteError(e.message));
-  } else if (state.currentTrack) { vibe(HAPTIC.select); togglePlay(); }
+  if (state.currentTrack) { vibe(HAPTIC.select); togglePlay(); }
 });
 addZoneTap('zone-left', () => {
   vibe(HAPTIC.tick);
-  if (state.view === 'remote' && state.remoteSession?.Player) {
-    plexCommand('skipPrevious')
-      .then(() => new Promise(r => setTimeout(r, 600)))
-      .then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); })
-      .catch(e => showRemoteError(e.message));
-  } else if (state.view === 'nowplaying') prevTrack();
+  if (state.view === 'nowplaying') prevTrack();
   else if (state.view === 'coverflow') cfNavigate(-1);
   else scrollMenu(-1);
 });
 addZoneTap('zone-right', () => {
   vibe(HAPTIC.tick);
-  if (state.view === 'remote' && state.remoteSession?.Player) {
-    plexCommand('skipNext')
-      .then(() => new Promise(r => setTimeout(r, 600)))
-      .then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); })
-      .catch(e => showRemoteError(e.message));
-  } else if (state.view === 'nowplaying') nextTrack();
+  if (state.view === 'nowplaying') nextTrack();
   else if (state.view === 'coverflow') cfNavigate(1);
   else scrollMenu(1);
 });
@@ -2645,13 +2377,6 @@ document.getElementById('wheel-center').addEventListener('click', () => {
   if (state.view === 'menu')           { vibe(HAPTIC.select); selectItem(); }
   else if (state.view === 'coverflow') { vibe(HAPTIC.select); cfOpenCurrentAlbum(); }
   else if (state.view === 'nowplaying') { vibe(HAPTIC.select); togglePlay(); }
-  else if (state.view === 'remote' && state.remoteSession?.Player) {
-    const rs = state.remoteSession;
-    vibe(HAPTIC.select);
-    plexCommand(rs.Player.state === 'playing' ? 'pause' : 'play')
-      .then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); })
-      .catch(e => showRemoteError(e.message));
-  }
   else if (state.view === 'setup') {
     // Trigger whichever primary action button is visible
     const btn = document.getElementById('plex-oauth-btn')
@@ -2668,7 +2393,7 @@ document.addEventListener('keydown', e => {
     case 'ArrowDown':  scrollMenu(1); break;
     case 'ArrowLeft':  if (state.view === 'nowplaying') prevTrack(); else if (state.view === 'coverflow') cfNavigate(-1); break;
     case 'ArrowRight': if (state.view === 'nowplaying') nextTrack(); else if (state.view === 'coverflow') cfNavigate(1);  break;
-    case 'Enter':      if (state.view === 'menu') selectItem(); else if (state.view === 'coverflow') cfOpenCurrentAlbum(); else if (state.view === 'nowplaying') togglePlay(); else if (state.view === 'remote' && state.remoteSession?.Player) { const rs = state.remoteSession; plexCommand(rs.Player.state === 'playing' ? 'pause' : 'play').then(() => refreshRemoteSession()).then(() => { if (state.view === 'remote') renderRemote(); }).catch(e => showRemoteError(e.message)); } break;
+    case 'Enter':      if (state.view === 'menu') selectItem(); else if (state.view === 'coverflow') cfOpenCurrentAlbum(); else if (state.view === 'nowplaying') togglePlay(); break;
     case 'Escape': case 'Backspace': goBack(); break;
     case ' ':          if (state.currentTrack) { e.preventDefault(); togglePlay(); } break;
     case 'f': case 'F': toggleFullscreen(); break;
