@@ -26,9 +26,38 @@ function isValidUrl(url) {
   } catch { return false; }
 }
 
+// ── localStorage helper — all keys namespaced under 'mp.' to avoid collisions ──
+const ls = {
+  get:    k => localStorage.getItem('mp.' + k),
+  set:    (k, v) => localStorage.setItem('mp.' + k, v),
+  remove: k => localStorage.removeItem('mp.' + k),
+};
+// One-time migration: move bare-named keys into the mp.* namespace
+(function migrateLs() {
+  const keys = ['plexClientId','themeMode','einkInverted','darkMode','plexUrl','plexToken',
+                 'lbToken','themeUiHue','themePodHue','themePodSat','repeat','shuffle',
+                 'crossfade','hapticStrength','serverType'];
+  for (const k of keys) {
+    const v = localStorage.getItem(k);
+    if (v !== null) {
+      if (localStorage.getItem('mp.' + k) === null) localStorage.setItem('mp.' + k, v);
+      localStorage.removeItem(k);
+    }
+  }
+}());
+
+// ── Sanitise error messages before showing them in the UI ──
+// Logs the full message to console; strips URLs so internal addresses aren't exposed.
+function userMsg(e) {
+  const msg = (typeof e === 'string' ? e : e?.message) || 'Something went wrong.';
+  console.error('[mediapod]', msg);
+  if (/https?:\/\//i.test(msg)) return 'Connection failed. Check your server settings.';
+  return msg;
+}
+
 // ── Stable client ID — generated once, persisted using CSPRNG ──
 // Validate any stored value matches expected UUID/hex pattern before trusting it
-const _storedClientId = localStorage.getItem('plexClientId');
+const _storedClientId = ls.get('plexClientId');
 const _validClientId  = _storedClientId && /^[a-f0-9\-]{32,36}$/.test(_storedClientId)
   ? _storedClientId
   : null;
@@ -36,7 +65,7 @@ const PLEX_CLIENT_ID = 'mediapod-web-' + (_validClientId || (() => {
   const id = typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
     : Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2,'0')).join('');
-  localStorage.setItem('plexClientId', id);
+  ls.set('plexClientId', id);
   return id;
 })());
 
@@ -49,19 +78,19 @@ const _serverType = 'plex';
 
 // ── Theme mode (migrates legacy values) ──
 const VALID_MODES = ['light','dark','eink-white','eink-black','highcontrast','coffee','terminal','cyberpunk','oled'];
-const _storedMode = localStorage.getItem('themeMode');
-const _storedEinkInverted = localStorage.getItem('einkInverted') === 'true';
+const _storedMode = ls.get('themeMode');
+const _storedEinkInverted = ls.get('einkInverted') === 'true';
 // Migrate old mode names to new ones
 const _migratedMode = _storedMode === 'eink'  ? (_storedEinkInverted ? 'eink-black' : 'eink-white')
                     : _storedMode === 'retro' ? 'coffee'
                     : _storedMode;
 const _themeMode = VALID_MODES.includes(_migratedMode) ? _migratedMode
-  : (localStorage.getItem('darkMode') === 'false' ? 'light' : 'dark');
+  : (ls.get('darkMode') === 'false' ? 'light' : 'dark');
 
 // ── Validate stored URLs/tokens before trusting them ──
-const _storedPlexUrl    = localStorage.getItem('plexUrl')   || '';
-const _storedPlexToken  = localStorage.getItem('plexToken') || '';
-const _storedLbToken    = localStorage.getItem('lbToken')   || '';
+const _storedPlexUrl    = ls.get('plexUrl')   || '';
+const _storedPlexToken  = ls.get('plexToken') || '';
+const _storedLbToken    = ls.get('lbToken')   || '';
 
 const _tokenRe = /^[a-zA-Z0-9_-]+$/;
 const _uuidRe  = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -88,19 +117,19 @@ const state = {
   duration:    0,
   view:        'setup',
   themeMode:   _themeMode,
-  einkInverted: localStorage.getItem('einkInverted') === 'true',
+  einkInverted: ls.get('einkInverted') === 'true',
   fullscreen:      false,
-  hapticStrength:  (['off','light','medium','strong'].includes(localStorage.getItem('hapticStrength')) ? localStorage.getItem('hapticStrength') : 'medium'),
-  repeat:          (['off','all','one'].includes(localStorage.getItem('repeat')) ? localStorage.getItem('repeat') : 'off'),
-  shuffle:         localStorage.getItem('shuffle')   === 'true',
-  crossfade:       clampInt(localStorage.getItem('crossfade'), 0, 10, 0), // seconds
+  hapticStrength:  (['off','light','medium','strong'].includes(ls.get('hapticStrength')) ? ls.get('hapticStrength') : 'medium'),
+  repeat:          (['off','all','one'].includes(ls.get('repeat')) ? ls.get('repeat') : 'off'),
+  shuffle:         ls.get('shuffle')   === 'true',
+  crossfade:       clampInt(ls.get('crossfade'), 0, 10, 0), // seconds
   sleepTimerId:    null,
   sleepMins:       0,
   sleepEndsAt:     null,
   theme: {
-    uiHue:  clampInt(localStorage.getItem('themeUiHue'),  0, 359, 0),
-    podHue: clampInt(localStorage.getItem('themePodHue'), 0, 359, 0),
-    podSat: clampInt(localStorage.getItem('themePodSat'), 0, 55,  0),
+    uiHue:  clampInt(ls.get('themeUiHue'),  0, 359, 0),
+    podHue: clampInt(ls.get('themePodHue'), 0, 359, 0),
+    podSat: clampInt(ls.get('themePodSat'), 0, 55,  0),
   },
 };
 
@@ -356,9 +385,9 @@ function applyTheme() {
 }
 
 function saveTheme() {
-  localStorage.setItem('themeUiHue',  state.theme.uiHue);
-  localStorage.setItem('themePodHue', state.theme.podHue);
-  localStorage.setItem('themePodSat', state.theme.podSat);
+  ls.set('themeUiHue',  state.theme.uiHue);
+  ls.set('themePodHue', state.theme.podHue);
+  ls.set('themePodSat', state.theme.podSat);
 }
 
 // ═══════════════════════════════════════════
@@ -433,7 +462,7 @@ function applyThemeMode() {
 function setThemeMode(mode) {
   if (!VALID_MODES.includes(mode)) return;
   state.themeMode = mode;
-  localStorage.setItem('themeMode', mode);
+  ls.set('themeMode', mode);
   if (THEME_DEFAULT_HUES[mode] != null) {
     state.theme.uiHue = THEME_DEFAULT_HUES[mode];
     saveTheme();
@@ -968,12 +997,12 @@ function playShuffled(tracks) {
 function toggleRepeat() {
   const cycle = { off: 'all', all: 'one', one: 'off' };
   state.repeat = cycle[state.repeat] || 'off';
-  localStorage.setItem('repeat', state.repeat);
+  ls.set('repeat', state.repeat);
 }
 
 function toggleShuffle() {
   state.shuffle = !state.shuffle;
-  localStorage.setItem('shuffle', state.shuffle);
+  ls.set('shuffle', state.shuffle);
 }
 
 // ── Track rating ─────────────────────────────────────────────────────────────
@@ -1064,7 +1093,7 @@ function crossfadeLabel() {
 function cycleCrossfade() {
   const idx = CROSSFADE_OPTIONS.indexOf(state.crossfade);
   state.crossfade = CROSSFADE_OPTIONS[(idx + 1) % CROSSFADE_OPTIONS.length];
-  localStorage.setItem('crossfade', state.crossfade);
+  ls.set('crossfade', state.crossfade);
   if (state.crossfade === 0) { if (_xfRaf) { cancelAnimationFrame(_xfRaf); _xfRaf = null; } state.audio.volume = 1; }
   const m = currentMenu();
   const item = m?.items.find(i => i._id === 'crossfade');
@@ -1106,7 +1135,7 @@ async function apiMenu(loadMsg, fetchFn, mapFn, title) {
   try {
     const data = await fetchFn();
     pushMenu(title, mapFn(data));
-  } catch(e) { showMenuError(e.message); }
+  } catch(e) { showMenuError(userMsg(e)); }
 }
 
 // ═══════════════════════════════════════════
@@ -1137,14 +1166,14 @@ async function openMusicMenu() {
           try {
             const d = await plexFetch(`/library/sections/${sectionKey}/all?type=10`);
             playShuffled(d.MediaContainer.Metadata || []);
-          } catch(e) { showMenuError(e.message); }
+          } catch(e) { showMenuError(userMsg(e)); }
       }},
       { label: 'Artists',   arrow: true, action: () => openArtistList(sectionKey, 'Artists') },
       { label: 'Albums',    arrow: true, action: () => openAlbumList(sectionKey, 'Albums') },
       { label: 'Songs',     arrow: true, action: () => openSongList(sectionKey, 'Songs') },
       { label: 'Playlists', arrow: true, action: openPlaylists },
     ]);
-  } catch(e) { showMenuError(e.message); }
+  } catch(e) { showMenuError(userMsg(e)); }
 }
 
 const HAPTIC_LEVELS = ['off', 'light', 'medium', 'strong'];
@@ -1155,7 +1184,7 @@ function hapticLabel() {
 function cycleHaptic() {
   const idx = HAPTIC_LEVELS.indexOf(state.hapticStrength);
   state.hapticStrength = HAPTIC_LEVELS[(idx + 1) % HAPTIC_LEVELS.length];
-  localStorage.setItem('hapticStrength', state.hapticStrength);
+  ls.set('hapticStrength', state.hapticStrength);
   vibe(HAPTIC.tick); // preview the new level
   const m = currentMenu();
   const item = m?.items.find(i => i._id === 'haptic');
@@ -1222,8 +1251,8 @@ function openSettings() {
           state.audio.pause();
           stopPlexPoll();
           state.plexUrl = ''; state.plexToken = '';
-          localStorage.removeItem('plexUrl'); localStorage.removeItem('plexToken');
-          localStorage.removeItem('serverType');
+          ls.remove('plexUrl'); ls.remove('plexToken');
+          ls.remove('serverType');
           state.connected = false; state.connStatus = 'disconnected';
           state.navStack = []; state.currentTrack = null;
           state.serverType = 'plex';
@@ -1252,7 +1281,7 @@ async function openArtistAlbums(key, name) {
           try {
             const d = await plexFetch(`/library/metadata/${key}/allLeaves`);
             playShuffled(d.MediaContainer.Metadata || []);
-          } catch(e) { showMenuError(e.message); }
+          } catch(e) { showMenuError(userMsg(e)); }
       }},
       ...albums
     ];
@@ -1316,7 +1345,7 @@ async function openCoverFlow() {
     state.coverFlowIndex = 0;
     state.view = 'coverflow';
     render();
-  } catch(e) { showMenuError(e.message); }
+  } catch(e) { showMenuError(userMsg(e)); }
 }
 
 function cfNavigate(dir) {
@@ -1558,7 +1587,7 @@ const PLEX_HEADERS = {
 };
 
 function stopPlexPoll() {
-  if (state.plexPinPoll) { clearInterval(state.plexPinPoll); state.plexPinPoll = null; }
+  if (state.plexPinPoll) { clearTimeout(state.plexPinPoll); state.plexPinPoll = null; }
 }
 
 async function startPlexOAuth() {
@@ -1594,10 +1623,19 @@ async function startPlexOAuth() {
 
     renderPlexWaiting(pin.code);
 
-    let attempts = 0;
-    state.plexPinPoll = setInterval(async () => {
-      attempts++;
-      if (attempts > 150) { stopPlexPoll(); renderSetup(document.getElementById('screen')); return; }
+    let pollAttempt = 0;
+    const pollStart = Date.now();
+    const schedulePinPoll = () => {
+      if (Date.now() - pollStart >= 90_000) {
+        stopPlexPoll();
+        renderSetup(document.getElementById('screen'));
+        return;
+      }
+      // Exponential backoff: 1s → 1.5s → 2s → … capped at 5s
+      const delay = Math.min(5000, 1000 + pollAttempt * 500);
+      state.plexPinPoll = setTimeout(doPinPoll, delay);
+    };
+    const doPinPoll = async () => {
       try {
         const checkRes = await fetchWithTimeout(
           `https://plex.tv/api/v2/pins/${pinId}`,
@@ -1609,15 +1647,19 @@ async function startPlexOAuth() {
           stopPlexPoll();
           try { authWin?.close(); } catch (_) {}
           await completePlexAuth(data.authToken);
+          return;
         }
       } catch (_) {}
-    }, 2000);
+      pollAttempt++;
+      schedulePinPoll();
+    };
+    schedulePinPoll();
 
   } catch (e) {
     try { authWin?.close(); } catch (_) {}
     if (btn) { btn.textContent = 'Sign in with Plex'; btn.disabled = false; }
     const err = document.getElementById('setup-error');
-    if (err) { err.textContent = e.message; err.style.display = 'block'; }
+    if (err) { err.textContent = userMsg(e); err.style.display = 'block'; }
   }
 }
 
@@ -1667,7 +1709,7 @@ async function completePlexAuth(token) {
     state.view = 'setup'; render();
     setTimeout(() => {
       const err = document.getElementById('setup-error');
-      if (err) { err.textContent = e.message; err.style.display = 'block'; }
+      if (err) { err.textContent = userMsg(e); err.style.display = 'block'; }
     }, 30);
   }
 }
@@ -1703,7 +1745,7 @@ function renderPlexServerPicker(servers, token) {
         renderPlexServerPicker(servers, token);
         setTimeout(() => {
           const errEl = document.getElementById('picker-error');
-          if (errEl) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+          if (errEl) { errEl.textContent = userMsg(e); errEl.style.display = 'block'; }
         }, 30);
       }
     });
@@ -1748,9 +1790,9 @@ async function connectToPlexServer(server, token) {
       // ✓ reachable — commit
       state.plexUrl   = url;
       state.plexToken = token;
-      localStorage.setItem('plexUrl',    url);
-      localStorage.setItem('plexToken',  token);
-      localStorage.setItem('serverType', 'plex');
+      ls.set('plexUrl',    url);
+      ls.set('plexToken',  token);
+      ls.set('serverType', 'plex');
       state.connected   = true;
       state.connStatus  = 'connected';
       state.navStack    = [buildMainMenu()];
@@ -1845,15 +1887,15 @@ function renderSetup(screen) {
         state.plexUrl   = url;
         state.plexToken = token;
         state.serverType = 'plex';
-        localStorage.setItem('plexUrl',    url);
-        localStorage.setItem('plexToken',  token);
-        localStorage.setItem('serverType', 'plex');
+        ls.set('plexUrl',    url);
+        ls.set('plexToken',  token);
+        ls.set('serverType', 'plex');
         state.connected = true; state.connStatus = 'connected';
         state.navStack = [buildMainMenu()]; state.view = 'menu';
         applyTheme(); render();
       } catch (e) {
         _lastConnectFailTs = Date.now();
-        showErr(e.message || 'Could not connect. Check your server URL and Plex token.');
+        showErr(userMsg(e) || 'Could not connect. Check your server URL and Plex token.');
       }
     });
 
@@ -1939,8 +1981,8 @@ function renderLbSetup(screen) {
       return;
     }
     state.lbToken = token;
-    if (token) localStorage.setItem('lbToken', token);
-    else localStorage.removeItem('lbToken');
+    if (token) ls.set('lbToken', token);
+    else ls.remove('lbToken');
     const item = currentMenu()?.items?.find(i => i._id === 'lb');
     if (item) item.label = state.lbToken ? '🔗 Scrobbling: On' : '🔗 Scrobbling: Off';
     state.view = 'menu'; render();
@@ -1950,7 +1992,7 @@ function renderLbSetup(screen) {
   });
   screen.querySelector('#lb-clear')?.addEventListener('click', () => {
     state.lbToken = '';
-    localStorage.removeItem('lbToken');
+    ls.remove('lbToken');
     const item = currentMenu()?.items?.find(i => i._id === 'lb');
     if (item) item.label = '🔗 Scrobbling: Off';
     state.view = 'menu'; render();
@@ -2021,7 +2063,7 @@ function renderNowPlaying(screen) {
 
   // Set blur background via DOM to avoid CSS injection through inline style
   const blurDiv = el.querySelector('.np-bg-blur');
-  if (blurDiv && bgThumb) blurDiv.style.backgroundImage = `url("${bgThumb.replace(/["\\]/g, '\\$&')}")`;
+  if (blurDiv && bgThumb) blurDiv.style.backgroundImage = `url(${JSON.stringify(bgThumb)})`;
 
   // Wire star rating
   const starsRow = el.querySelector('.np-stars');

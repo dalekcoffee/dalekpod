@@ -11,7 +11,7 @@
 <meta name="referrer" content="no-referrer">
 <!-- connect-src cannot be narrowed: Plex server URLs are user-configured at runtime. Accepted risk for personal-use deployment. -->
 <!-- frame-ancestors cannot be set via <meta> — only works as an HTTP header, which GitHub Pages does not support. Clickjacking risk is accepted for personal-use deployment. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://plex.tv https://*.plex.tv https://*.plex.direct data: blob:; connect-src 'self' https://plex.tv https://*.plex.tv https://*.plex.tv:* https://*.plex.direct https://*.plex.direct:* https://plex-proxy.dalek.coffee https://api.listenbrainz.org; img-src * data: blob:; media-src * blob:; style-src 'self' 'unsafe-inline'; script-src 'self';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://plex.tv https://*.plex.tv https://*.plex.direct blob:; connect-src 'self' https://plex.tv https://*.plex.tv https://*.plex.tv:* https://*.plex.direct https://*.plex.direct:* https://plex-proxy.dalek.coffee https://api.listenbrainz.org; img-src 'self' https://plex.tv https://*.plex.tv https://*.plex.direct https://plex-proxy.dalek.coffee data: blob:; media-src 'self' https://plex.tv https://*.plex.tv https://*.plex.tv:* https://*.plex.direct https://*.plex.direct:* https://plex-proxy.dalek.coffee blob:; style-src 'self' 'unsafe-inline'; script-src 'self';">
 <title>MediaPod</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="favicon.ico" sizes="any">

@@ -31,8 +31,9 @@ self.addEventListener('fetch', e => {
 
       try {
         const response = await fetch(e.request);
-        // Cache successful image responses (including opaque cross-origin responses)
-        if (response.ok || response.type === 'opaque') {
+        // Cache successful same-origin or CORS-enabled responses only;
+        // opaque responses are excluded — their content is unverifiable.
+        if (response.ok) {
           cache.put(e.request, response.clone());
         }
         return response;
